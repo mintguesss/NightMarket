@@ -11,7 +11,7 @@
 <body>
 <div class="app" id="app">
   <nav class="nav" id="nav">
-    <div class="mswitch" id="mktSwitch" role="tablist" aria-label="切換市場"></div>
+    <button class="mkt-btn" id="mktSwitch" data-mkt-toggle></button>
     <button class="nav-btn active" data-view="chart"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span>看盤</span></button>
     <button class="nav-btn" data-view="market"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg><span>市場</span></button>
     <button class="nav-btn" data-view="rank"><svg viewBox="0 0 24 24"><path d="M4 20V12M10 20V4M16 20v-6M3 20h18"/></svg><span>排行</span></button>
@@ -43,6 +43,7 @@
   <main class="center">
     <header class="topbar">
       <button class="m-back" id="mBack" title="返回">‹</button>
+      <button class="mkt-btn m-mkt" id="mktSwitchM" data-mkt-toggle></button>
       <div class="search">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>
         <input id="searchInput" placeholder="代號或名稱：2330、台積電、AAPL、nvidia" autocomplete="off">

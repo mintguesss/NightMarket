@@ -955,10 +955,13 @@ function selectCode(code) {
 }
 function renderMktSwitch() {
   const m = state.mkt;
-  const el = $('#mktSwitch');
-  if (!el.firstChild) el.innerHTML = '<span class="thumb"></span><button data-m="tw" role="tab" title="台股"><b>台</b><small>TW</small></button><button data-m="us" role="tab" title="美股"><b>美</b><small>US</small></button>';
-  el.dataset.m = m;
-  el.querySelectorAll('button').forEach((x) => { x.classList.toggle('on', x.dataset.m === m); x.setAttribute('aria-selected', x.dataset.m === m); });
+  const other = m === 'tw' ? '美股' : '台股';
+  $$('[data-mkt-toggle]').forEach((el) => {
+    el.className = `mkt-btn ${m}${el.id === 'mktSwitchM' ? ' m-mkt' : ''}`;
+    el.innerHTML = `<span class="mk">${m === 'tw' ? '台' : '美'}</span><span class="sw" aria-hidden="true">⇄</span>${el.id === 'mktSwitch' ? `<span class="lb">${m === 'tw' ? '台股' : '美股'}</span>` : ''}`;
+    el.title = `目前是${m === 'tw' ? '台股' : '美股'}，點一下切換到${other}`;
+    el.setAttribute('aria-label', el.title);
+  });
   document.body.dataset.mkt = m;
   $('#searchInput').placeholder = m === 'tw' ? '台股代號或名稱：2330、台積電' : '美股代號或名稱：AAPL、nvidia';
 }
@@ -974,7 +977,7 @@ function switchMarket(m) {
   setView(state.view);
   toast(`已切換到${m === 'tw' ? '台股' : '美股'}`);
 }
-$('#mktSwitch').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) switchMarket(b.dataset.m); });
+$$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', () => { el.classList.add('spin'); setTimeout(() => el.classList.remove('spin'), 400); switchMarket(state.mkt === 'tw' ? 'us' : 'tw'); }));
 
 function appInit() {
   renderMktSwitch();

@@ -383,7 +383,7 @@ $('#paperBody').addEventListener('click', async (e) => {
 });
 $('#paperReset').addEventListener('click', () => {
   openModal('重設模擬帳戶', `<div class="hint" style="margin:0 0 12px">會清空<b>台股與美股</b>的所有持股、委託與紀錄。</div>
-    <div class="fld"><label>台股起始資金 (TWD)</label><input id="rsT" type="number" value="1000000"></div>
+    <div class="fld"><label>台股起始資金 (TWD)</label><input id="rsT" type="number" value="10000000"></div>
     <div class="fld"><label>美股起始資金 (USD)</label><input id="rsU" type="number" value="30000"></div>`,
     [{ label: '取消' }, { label: '重設', cls: 'danger', act: async (m) => { const r = await post('/api/paper/reset', { TWD: +m.querySelector('#rsT').value, USD: +m.querySelector('#rsU').value }); toast(r.msg); loadPaper(); } }]);
 });

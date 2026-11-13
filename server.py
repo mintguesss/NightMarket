@@ -589,7 +589,7 @@ def institutional(code, days=10):
 
 # ---------------- 模擬倉 ----------------
 _paper_lock = threading.RLock()
-DEFAULT_CASH = {"TWD": 1_000_000.0, "USD": 30_000.0}
+DEFAULT_CASH = {"TWD": 10_000_000.0, "USD": 30_000.0}
 
 
 def paper_new(cash=None):
