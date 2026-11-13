@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # 在 Android 手機上直接執行（不需要電腦）
 # 1. 從 F-Droid 或 GitHub 安裝 Termux
-# 2. 在 Termux 執行：pkg install -y git python && git clone <你的 repo 網址> && cd <資料夾> && bash deploy/run-android.sh
+# 2. 在 Termux 執行：pkg install -y git python && git clone https://github.com/mintguesss/NightMarket.git && cd NightMarket && bash deploy/run-android.sh
 # 3. 用手機的 Chrome 打開 http://localhost:8765 ，選單「加入主畫面」就會像 App 一樣開啟
 set -e
 cd "$(dirname "$0")/.."

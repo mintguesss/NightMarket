@@ -2,6 +2,8 @@
 
 # NightMarket 🏮
 
+[![CI](https://github.com/mintguesss/NightMarket/actions/workflows/ci.yml/badge.svg)](https://github.com/mintguesss/NightMarket/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/mintguesss/NightMarket)](https://github.com/mintguesss/NightMarket/releases) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
 *Taiwan trades by day, Wall Street by night — so Taiwanese investors watch US stocks at night, like strolling a night market (夜市).*
 
 **A full-featured stock terminal for Taiwan 🇹🇼 and US 🇺🇸 markets — pure Python, zero dependencies.**
@@ -54,8 +56,8 @@ python server.py        # then open http://localhost:8765
 Requires Python 3.10+. Nothing to install.
 
 ```bash
-git clone <this repo>
-cd <repo folder>
+git clone https://github.com/mintguesss/NightMarket.git
+cd NightMarket
 python server.py
 ```
 

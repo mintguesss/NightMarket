@@ -2,6 +2,8 @@
 
 # NightMarket 夜市 🏮
 
+[![CI](https://github.com/mintguesss/NightMarket/actions/workflows/ci.yml/badge.svg)](https://github.com/mintguesss/NightMarket/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/mintguesss/NightMarket)](https://github.com/mintguesss/NightMarket/releases) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+
 *白天看台股，晚上逛美股——台灣人看美股就像逛夜市。*
 
 **純 Python、零依賴的台股／美股看盤軟體。** 不用 `pip install`、不用 API 金鑰、不用註冊，一行指令就有台股即時報價與五檔、美股盤前盤後、20 多種指標、畫線工具、策略回測與推播提醒、市場熱力圖和模擬倉。
