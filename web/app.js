@@ -1,5 +1,12 @@
 /* NightMarket - 核心（看盤、自選、右側、搜尋、底部、版面） */
-const GRID = '#1d212c', TXT = '#7d8494';
+// 圖表配色跟著主題走（深色／淺色）
+const THEMES = {
+  dark: { grid: '#1d212c', txt: '#7d8494', border: '#262b38', cross: '#555c6b', label: '#2a3040', guide: '#3a4050', ext: '#8a90a0', hist: '#c9ccd3' },
+  light: { grid: '#eef0f4', txt: '#6b7280', border: '#e2e5eb', cross: '#9aa1ad', label: '#4b5563', guide: '#c9ced8', ext: '#9aa1ad', hist: '#4b5563' },
+};
+const curTheme = () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+let CT = THEMES[curTheme()];
+let GRID = CT.grid, TXT = CT.txt;
 let UP = '#f0444f', DOWN = '#17b978';
 const DEFAULT_WATCH = ['2330', '2317', '2454', '2308', '2382', '2303', '3711', '2881', '2412', '2603', '6488', '0050', '0056', '00878',
   'Y.CL=F', 'US.GOOGL', 'US.SPCX', 'US.SKHY', 'US.NOK', 'US.COHR', 'US.AAOI', 'US.LITE', 'US.SNDK', 'US.MU', 'US.WDC', 'US.STX', 'US.AMD', 'US.ARM',
@@ -125,6 +132,30 @@ function applyColors() {
   document.documentElement.style.setProperty('--up', UP); document.documentElement.style.setProperty('--down', DOWN);
 }
 applyColors();
+// 主題：dark / light / auto（跟隨系統）。index.html 開頭已先套用一次，避免閃一下
+function themeChartOpts() {
+  return { layout: { textColor: CT.txt }, grid: { vertLines: { color: CT.grid }, horzLines: { color: CT.grid } }, rightPriceScale: { borderColor: CT.border },
+    timeScale: { borderColor: CT.border }, crosshair: { vertLine: { color: CT.cross, labelBackgroundColor: CT.label }, horzLine: { color: CT.cross, labelBackgroundColor: CT.label } } };
+}
+function applyTheme() {
+  const pref = state.settings.theme || 'dark';
+  const t = pref === 'auto' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : pref;
+  document.documentElement.dataset.theme = t;
+  CT = THEMES[t]; GRID = CT.grid; TXT = CT.txt;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t === 'light' ? '#ffffff' : '#151821');
+  const o = themeChartOpts();
+  [...(typeof allCharts !== 'undefined' ? allCharts : []), typeof stState !== 'undefined' ? stState.chart : null, ...(typeof mtState !== 'undefined' ? mtState.charts : []).map((m) => m?.chart)].forEach((c) => { try { c && c.applyOptions(o); } catch {} });
+  $$('[data-theme-toggle]').forEach((b) => { b.innerHTML = (t === 'light' ? THEME_ICON.moon : THEME_ICON.sun) + (b.classList.contains('nav-btn') ? `<span>${t === 'light' ? '深色' : '淺色'}</span>` : ''); b.title = t === 'light' ? '切換成深色' : '切換成淺色'; });
+  if (typeof rerender === 'function' && state.bars?.length) rerender(true);
+  if (typeof renderWatch === 'function') renderWatch();
+}
+const THEME_ICON = {
+  sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>',
+};
+function toggleTheme() { state.settings.theme = curTheme() === 'light' ? 'dark' : 'light'; save('settings'); applyTheme(); }
+matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { if (state.settings.theme === 'auto') applyTheme(); });
+document.addEventListener('click', (e) => { if (e.target.closest('[data-theme-toggle]')) toggleTheme(); });
 
 /* ---------- 選單 / 對話框 ---------- */
 function openMenu(x, y, items) {
@@ -178,9 +209,9 @@ function promptBox(title, label, val, onOk) {
 const chartOpts = (showTime) => ({
   layout: { background: { color: 'transparent' }, textColor: TXT, fontSize: 11, fontFamily: 'Segoe UI, Arial' },
   grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
-  rightPriceScale: { borderColor: '#262b38', minimumWidth: 72 },
-  timeScale: { borderColor: '#262b38', visible: showTime, timeVisible: true, secondsVisible: false, rightOffset: 4 },
-  crosshair: { mode: 0, vertLine: { color: '#555c6b', labelBackgroundColor: '#2a3040' }, horzLine: { color: '#555c6b', labelBackgroundColor: '#2a3040' } },
+  rightPriceScale: { borderColor: CT.border, minimumWidth: 72 },
+  timeScale: { borderColor: CT.border, visible: showTime, timeVisible: true, secondsVisible: false, rightOffset: 4 },
+  crosshair: { mode: 0, vertLine: { color: CT.cross, labelBackgroundColor: CT.label }, horzLine: { color: CT.cross, labelBackgroundColor: CT.label } },
   localization: { locale: LANG === 'en' ? 'en-US' : 'zh-TW', dateFormat: 'yyyy/MM/dd' },
   handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, // 手機上下滑動捲頁面
   autoSize: true,
@@ -234,7 +265,7 @@ function renderMain() {
     const last = closes[closes.length - 1], base = state.prev ?? closes[0], col = last >= base ? UP : DOWN;
     primary = mainChart.addAreaSeries({ lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
     mainSeries.push(primary);
-    const data = bars.map((b) => (inRegular(b.t) ? { time: toTime(b.t), value: b.c } : { time: toTime(b.t), value: b.c, lineColor: '#8a90a0', topColor: '#8a90a022', bottomColor: '#8a90a003' }));
+    const data = bars.map((b) => (inRegular(b.t) ? { time: toTime(b.t), value: b.c } : { time: toTime(b.t), value: b.c, lineColor: CT.ext, topColor: CT.ext + '22', bottomColor: CT.ext + '03' }));
     if (state.period === 'tick') {
       const end = state.sessionEnd && state.sessionEnd > bars[0].t && state.sessionEnd - bars[0].t < 86400 ? state.sessionEnd
         : Math.floor((bars[0].t + state.off) / 86400) * 86400 - state.off + 13.5 * 3600;
@@ -286,11 +317,11 @@ function renderSub(i) {
     const s = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceFormat: r.volume ? { type: 'volume' } : { type: 'price', precision: 2, minMove: 0.01 } });
     subSeries[i].push(s);
     s.setData(bars.map((b, j) => (r.hist[j].v == null || isNaN(r.hist[j].v) ? { time: toTime(b.t) } : { time: toTime(b.t), value: r.hist[j].v, color: (r.hist[j].up ? UP : DOWN) + 'cc' })));
-    subPrimary[i] = s; subInfo[i].push({ name: r.label || key, color: '#c9ccd3', vals: r.hist.map((h) => h.v), vol: r.volume });
+    subPrimary[i] = s; subInfo[i].push({ name: r.label || key, color: CT.hist, vals: r.hist.map((h) => h.v), vol: r.volume });
   }
   r.lines.forEach((l) => { const s = addLine(chart, subSeries[i], l, bars); if (!subPrimary[i]) subPrimary[i] = s; subInfo[i].push({ ...l, vol: r.volume }); });
   if (r.volume && !r.hist) subSeries[i].forEach((s) => s.applyOptions({ priceFormat: { type: 'volume' } }));
-  (r.guides || []).forEach((g) => subPrimary[i]?.createPriceLine({ price: g, color: '#3a4050', lineStyle: 2, axisLabelVisible: false }));
+  (r.guides || []).forEach((g) => subPrimary[i]?.createPriceLine({ price: g, color: CT.guide, lineStyle: 2, axisLabelVisible: false }));
   updateSubLegend(i, bars.length - 1);
 }
 
@@ -497,7 +528,7 @@ function drawSpark(cv, sp, W = 58, H = 26, code = null) {
   const span = ts && sp.start && sp.end > sp.start ? sp.end - sp.start : 0;
   const x = span ? (i) => Math.max(0, Math.min(1, (ts[i] - sp.start) / span)) * W : (i) => (i / (c.length - 1)) * W;
   const y = (v) => H - 2 - ((v - lo) / rg) * (H - 4), col = c[c.length - 1] >= base ? UP : DOWN;
-  if (base >= lo && base <= hi) { ctx.setLineDash([2, 2]); ctx.strokeStyle = '#3a4050'; ctx.beginPath(); ctx.moveTo(0, y(base)); ctx.lineTo(W, y(base)); ctx.stroke(); ctx.setLineDash([]); }
+  if (base >= lo && base <= hi) { ctx.setLineDash([2, 2]); ctx.strokeStyle = CT.guide; ctx.beginPath(); ctx.moveTo(0, y(base)); ctx.lineTo(W, y(base)); ctx.stroke(); ctx.setLineDash([]); }
   ctx.beginPath(); c.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)))); ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.stroke();
   ctx.lineTo(x(c.length - 1), H); ctx.lineTo(x(0), H); ctx.closePath();
   const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, col + '55'); g.addColorStop(1, col + '00'); ctx.fillStyle = g; ctx.fill();
@@ -535,7 +566,7 @@ function renderWatch() {
   el.innerHTML = codes.map((c) => {
     const q = state.quotes[c], { d, pct } = chgOf(q), k = cls(d), al = state.alerts[c];
     const x = S.showExt && q?.ext && q.price ? q.ext : null, xd = x ? x.price - q.price : 0, xk = cls(xd);
-    const pctTxt = q ? (S.pctBox ? `<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--';
+    const pctTxt = q ? (S.pctBox || document.body.classList.contains('mobile') ?`<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--';
     return `<div class="wrow ${c === state.code ? 'active' : ''} ${state.stars.includes(c) ? 'star' : ''} ${state.pinned.includes(c) ? 'pinned' : ''}" data-code="${esc(c)}">
       <div class="wname"><b>${esc(nameOf(c))}</b><small>${esc(showCode(c))}${al && (al.above || al.below || al.pctUp || al.pctDown) ? '<span class="walert">🔔</span>' : ''}</small>${state.notes[c] ? `<span class="wnote">${esc(state.notes[c])}</span>` : ''}</div>
       ${S.spark ? '<canvas></canvas>' : '<span></span>'}
@@ -884,14 +915,15 @@ $('#nav').addEventListener('click', (e) => {
 });
 function settingsPanel() {
   const S = state.settings;
-  openModal('設定', `<div class="fld"><label>漲跌顏色</label><select id="stColor"><option value="redUp" ${S.colorMode === 'redUp' ? 'selected' : ''}>紅漲綠跌（台灣習慣）</option><option value="greenUp" ${S.colorMode === 'greenUp' ? 'selected' : ''}>綠漲紅跌（歐美習慣）</option></select></div>
+  openModal('設定', `<div class="fld"><label>外觀</label><select id="stTheme">${[['dark', '深色'], ['light', '淺色'], ['auto', '跟隨系統']].map(([v, n]) => `<option value="${v}" ${(S.theme || 'dark') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+    <div class="fld"><label>漲跌顏色</label><select id="stColor"><option value="redUp" ${S.colorMode === 'redUp' ? 'selected' : ''}>紅漲綠跌（台灣習慣）</option><option value="greenUp" ${S.colorMode === 'greenUp' ? 'selected' : ''}>綠漲紅跌（歐美習慣）</option></select></div>
     <div class="fld"><label>盤中更新頻率</label><select id="stRef">${[5, 10, 30].map((s) => `<option value="${s}" ${S.refresh === s ? 'selected' : ''}>每 ${s} 秒</option>`).join('')}</select></div>
     <div class="fld"><label>語言 Language</label><select id="stLang"><option value="zh" ${LANG === 'zh' ? 'selected' : ''}>繁體中文</option><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option></select></div>
     <div class="fld"><label>推播通知</label><button class="btn sec" id="stNotify">設定 Telegram／Discord／ntfy</button></div>
     <div class="fld"><label>版面</label><button class="btn sec" id="stLayout">重設左右欄寬度</button></div>
     <div class="fld"><label>資料</label><button class="btn sec" id="stExport">匯出設定與自選</button><button class="btn sec" id="stImport">匯入</button></div>
     <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
-    [{ label: '取消' }, { label: '儲存', act: (m) => { const lang = m.querySelector('#stLang').value; if (lang !== LANG) { setLang(lang); return; } S.colorMode = m.querySelector('#stColor').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
+    [{ label: '取消' }, { label: '儲存', act: (m) => { const lang = m.querySelector('#stLang').value; if (lang !== LANG) { setLang(lang); return; } S.colorMode = m.querySelector('#stColor').value; S.theme = m.querySelector('#stTheme').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); applyTheme(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
   $('#stNotify').onclick = () => { closeModal(); notifyPanel(); };
   $('#stLayout').onclick = () => { state.layout = { lw: 380, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
   $('#stExport').onclick = () => {
@@ -1076,7 +1108,7 @@ function switchMarket(m) {
 $$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', () => { el.classList.add('spin'); setTimeout(() => el.classList.remove('spin'), 400); switchMarket(state.mkt === 'tw' ? 'us' : 'tw'); }));
 
 function appInit() {
-  renderMktSwitch();
+  applyTheme(); renderMktSwitch();
   $('#langLbl').textContent = LANG === 'en' ? '中文' : 'EN';
   applyLayout(); syncToolbar(); renderIndBars(); renderDrawBar(); renderWatchTabs();
   draw.setItems(store.get('tw.draw.' + state.code, []));

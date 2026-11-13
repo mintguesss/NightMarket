@@ -26,7 +26,34 @@ def lerp(a, b, t):
     return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
 
+MOON1, MOON2 = (255, 214, 120), (245, 150, 40)   # 月亮：亮金 -> 橘
+CANDLE = (255, 246, 228)
+# 新 logo：彎月懷抱三根上漲的 K 棒（夜 + 市場）
+MOON_A, MOON_B = (0.47, 0.52, 0.33), (0.60, 0.43, 0.285)   # 大圓減掉小圓 = 彎月
+BARS = [(0.555, 0.600, 0.715, 0.560, 0.750), (0.665, 0.490, 0.625, 0.445, 0.665), (0.775, 0.360, 0.520, 0.315, 0.565)]
+
+
 def pixel(x, y):
+    col = lerp((30, 34, 78), (10, 12, 28), (x * 0.4 + y * 0.6))  # 深藍夜空斜向漸層
+    for sx, sy, r in ((0.80, 0.18, 0.016), (0.20, 0.17, 0.011), (0.88, 0.70, 0.009)):
+        d = math.hypot(x - sx, y - sy)
+        if d < r * 2.4:
+            col = lerp(col, (235, 238, 255), max(0.0, 1 - d / (r * 2.4)) ** 2 * 0.9)
+    ax, ay, ar = MOON_A
+    bx, by, br = MOON_B
+    da, db = math.hypot(x - ax, y - ay), math.hypot(x - bx, y - by)
+    if ar < da < ar + 0.07 and db > br:  # 月亮外圈柔光（靠近缺口處淡出，避免出現圓形邊界）
+        fade = min(1.0, (db - br) / 0.08)
+        col = lerp(col, (245, 160, 60), (1 - (da - ar) / 0.07) ** 1.5 * 0.4 * fade)
+    if da < ar and db > br:
+        col = lerp(MOON1, MOON2, (y - (ay - ar)) / (2 * ar))
+    for cx, b0, b1, w0, w1 in BARS:
+        if (abs(x - cx) < 0.034 and b0 < y < b1) or (abs(x - cx) < 0.0075 and w0 < y < w1):
+            col = CANDLE
+    return col
+
+
+def pixel_lantern(x, y):  # 舊版燈籠（保留參考）
     col = lerp(SKY1, SKY2, y)
     # 星星
     for sx, sy, r in ((0.14, 0.16, 0.012), (0.84, 0.12, 0.010), (0.88, 0.40, 0.008), (0.10, 0.52, 0.008)):

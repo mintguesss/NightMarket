@@ -34,25 +34,52 @@
   $('#nav').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b || !isMobile()) return;
     if (b.dataset.view === 'chart') detail = false;
-    if (b.dataset.act === 'more') {
-      e.stopPropagation();
-      const r = b.getBoundingClientRect();
-      openMenu(r.left - 120, r.top - 250, [
-        { label: '熱力圖', icon: '▤', act: () => setView('heatmap') },
-        { label: '選股', icon: '⚲', act: () => setView('screener') },
-        { label: '策略與回測', icon: '↗', act: () => setView('strategy') },
-        { label: '期權', icon: '▦', act: () => setView('options') },
-        { label: '資訊（新聞、財報）', icon: '◉', act: () => setView('news') },
-        { label: '日曆', icon: '▣', act: () => setView('calendar') },
-        { label: '大盤走勢', icon: '↗', act: () => selectCode(MKT_INDEX[state.mkt]) },
-        'sep',
-        { label: '價格提醒', icon: '🔔', act: alertsPanel },
-        { label: '全螢幕', icon: '⛶', act: () => toggleFullscreen(document.documentElement) },
-        { label: '設定', icon: '⚙', act: settingsPanel },
-        { label: LANG === 'en' ? '中文' : 'English', icon: '🌐', act: () => setLang(LANG === 'en' ? 'zh' : 'en') },
-      ]);
-    }
+    if (b.dataset.act === 'more') { e.stopPropagation(); document.body.classList.contains('sheet-open') ? closeSheet() : openSheet(); return; }
+    closeSheet();
   }, true);
+
+  // 「更多」底部面板：功能用圖示格子排列，外觀／語言用切換鈕，只蓋住下半部
+  const icon = (sel) => document.querySelector(`#nav ${sel} svg`)?.outerHTML || '';
+  const SVG = {
+    alert: '<svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8M10 21h4"/></svg>',
+    fs: '<svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+    gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>',
+    globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
+    theme: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg>',
+    index: '<svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 6-8 3 3"/></svg>',
+  };
+  const sheet = document.createElement('div'); sheet.className = 'msheet';
+  const bd = document.createElement('div'); bd.className = 'msheet-bd';
+  document.body.append(bd, sheet);
+  function renderSheet() {
+    const tiles = [['heatmap', '熱力圖'], ['screener', '選股'], ['strategy', '策略回測'], ['options', '期權'], ['news', '資訊'], ['calendar', '日曆'], ['rank', '排行']]
+      .map(([v, n]) => `<button class="mtile" data-sv="${v}"><span class="ico">${icon(`[data-view="${v}"]`)}</span>${n}</button>`).join('') +
+      `<button class="mtile" data-sa="index"><span class="ico">${SVG.index}</span>大盤走勢</button>`;
+    const light = curTheme() === 'light';
+    sheet.innerHTML = `<div class="grab"></div><div class="msheet-h">功能</div><div class="msheet-grid">${tiles}</div>
+      <div class="msheet-h">偏好設定</div><div class="msheet-list">
+        <button class="mrow" data-sa="theme"><span class="ico">${SVG.theme}</span>外觀<span class="seg2"><b class="${light ? '' : 'on'}">深色</b><b class="${light ? 'on' : ''}">淺色</b></span></button>
+        <button class="mrow" data-sa="lang"><span class="ico">${SVG.globe}</span>語言<span class="seg2"><b class="${LANG === 'en' ? '' : 'on'}">中文</b><b class="${LANG === 'en' ? 'on' : ''}">EN</b></span></button>
+        <button class="mrow" data-sa="alerts"><span class="ico">${SVG.alert}</span>價格提醒<span class="val">›</span></button>
+        <button class="mrow" data-sa="fs"><span class="ico">${SVG.fs}</span>全螢幕<span class="val">›</span></button>
+        <button class="mrow" data-sa="settings"><span class="ico">${SVG.gear}</span>其他設定<span class="val">›</span></button></div>`;
+  }
+  function openSheet() { renderSheet(); document.body.classList.add('sheet-open'); document.querySelector('#nav [data-act="more"]')?.classList.add('open'); }
+  function closeSheet() { document.body.classList.remove('sheet-open'); document.querySelector('#nav [data-act="more"]')?.classList.remove('open'); }
+  bd.addEventListener('click', closeSheet);
+  sheet.addEventListener('click', (e) => {
+    const t = e.target.closest('[data-sv], [data-sa]'); if (!t) return;
+    if (t.dataset.sv) { closeSheet(); setView(t.dataset.sv); return; }
+    const a = t.dataset.sa;
+    if (a === 'theme') { toggleTheme(); renderSheet(); return; } // 外觀切換後面板留著，直接看到效果
+    if (a === 'lang') { setLang(LANG === 'en' ? 'zh' : 'en'); return; }
+    closeSheet();
+    if (a === 'index') selectCode(MKT_INDEX[state.mkt]);
+    if (a === 'alerts') alertsPanel();
+    if (a === 'fs') toggleFullscreen(document.documentElement);
+    if (a === 'settings') settingsPanel();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 
   // 返回鍵
   $('#mBack').addEventListener('click', () => {

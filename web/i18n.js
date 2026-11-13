@@ -100,6 +100,8 @@ const I18N_EN = {
   '當日漲跌 − 大盤(%)': 'Day change vs benchmark %', 'N 日報酬 − 大盤(%)': 'N-day return vs benchmark %', '大盤當日漲跌(%)': 'Benchmark change %',
   '大盤距 N 日均線(%)': 'Benchmark vs SMA %', '市場環境（1=多頭平穩，0=修正）': 'Market regime (1 = uptrend, 0 = correction)',
   '★ 台股逢低（只在大盤修正時）': '★ TW dip (only in corrections)', '★ 美股強勢突破（類股站穩時）': '★ US breakout (sector uptrend)', '★ 台股強勢突破': '★ TW breakout',
+  '外觀': 'Appearance', '深色': 'Dark', '淺色': 'Light', '跟隨系統': 'System', '功能': 'Features', '偏好設定': 'Preferences', '其他設定': 'More settings',
+  '策略回測': 'Strategies', '切換深色／淺色': 'Toggle dark / light', '切換成深色': 'Switch to dark', '切換成淺色': 'Switch to light',
   '全螢幕': 'Full screen', '⛶ 全螢幕': '⛶ Full screen', '⤡ 離開全螢幕': '⤡ Exit full screen', '離開': 'Exit',
   '全螢幕（Esc 離開）': 'Full screen (Esc to exit)', '只有圖表全螢幕（Esc 離開）': 'Chart full screen (Esc to exit)',
   '英文原文': 'Original', '翻譯': 'Translate', '回到最新 K 棒': 'Go to latest bar', '重設圖表（重新載入）': 'Reset chart (reload)', '重新載入圖表': 'Reload chart',
