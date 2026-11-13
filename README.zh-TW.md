@@ -14,7 +14,7 @@
 python server.py        # 打開 http://localhost:8765
 ```
 
-> 這是個人學習用的專案，**不提供真實下單**，也不是投資建議。
+> 這是個人使用的專案，**不提供真實下單**，也不是投資建議。
 
 ![看盤](docs/screenshots/chart-zh.png)
 
