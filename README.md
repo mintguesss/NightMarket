@@ -1,4 +1,6 @@
-# TW/US Stock Viewer
+# NightMarket 🏮
+
+*Taiwan trades by day, Wall Street by night — so Taiwanese investors watch US stocks at night, like strolling a night market (夜市).*
 
 **A full-featured stock terminal for Taiwan 🇹🇼 and US 🇺🇸 markets — pure Python, zero dependencies.**
 
@@ -65,8 +67,8 @@ Open <http://localhost:8765>. On Windows you can also double-click `start.bat` f
 | Phone, anywhere (private) | Run it at home and use [Tailscale](https://tailscale.com): `tailscale serve --bg 8765`, then open `https://<machine>.<tailnet>.ts.net` on your phone (HTTPS, only your devices) |
 | Phone on the same Wi-Fi | `python server.py --host 0.0.0.0 --password <secret>` |
 | **Android phone, no computer** | Install Termux → `pkg install git python` → clone → `bash deploy/run-android.sh` → open `http://localhost:8765` in Chrome |
-| Raspberry Pi / NAS | `deploy/tw-us-viewer.service` (systemd) + Tailscale |
-| Docker | `docker build -t tw-us-viewer . && docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=<secret> -v tw-us-data:/data tw-us-viewer` |
+| Raspberry Pi / NAS | `deploy/nightmarket.service` (systemd) + Tailscale |
+| Docker | `docker build -t nightmarket . && docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=<secret> -v nightmarket-data:/data nightmarket` |
 | Windows .exe | `py -m pip install pyinstaller` then `build_exe.bat` |
 
 Open it on a phone and use **Add to Home Screen** to get an app icon (PWA). Add `?lang=en` or `?lang=zh` to the URL to force a language, and `#view=heatmap` (or `strategy`, `screener`, `multi`, `calendar`…) to open a page directly.

@@ -14,7 +14,7 @@ import webbrowser
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 BASE_PORT = int(os.environ.get("PORT", "8765"))
-PROFILE = os.path.join(os.environ.get("LOCALAPPDATA", HERE), "TWUSStockViewer", "edge-profile")
+PROFILE = os.path.join(os.environ.get("LOCALAPPDATA", HERE), "NightMarket", "edge-profile")
 
 
 def port_in_use(port):
@@ -26,7 +26,7 @@ def port_in_use(port):
 def is_ours(port):
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1.5) as r:
-            return json.loads(r.read()).get("app") == "tw-us-stock-viewer"
+            return json.loads(r.read()).get("app") == "nightmarket"
     except Exception:
         return False
 

@@ -1,6 +1,6 @@
 {
-  "name": "台美股看盤",
-  "short_name": "台美股看盤",
+  "name": "NightMarket 夜市",
+  "short_name": "NightMarket",
   "description": "台股、美股看盤與模擬倉",
   "lang": "zh-Hant-TW",
   "start_url": "./",

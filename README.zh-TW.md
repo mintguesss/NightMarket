@@ -1,4 +1,6 @@
-# 台美股看盤
+# NightMarket 夜市 🏮
+
+*白天看台股，晚上逛美股——台灣人看美股就像逛夜市。*
 
 **純 Python、零依賴的台股／美股看盤軟體。** 不用 `pip install`、不用 API 金鑰、不用註冊，一行指令就有台股即時報價與五檔、美股盤前盤後、20 多種指標、畫線工具、策略回測與推播提醒、市場熱力圖和模擬倉。
 
@@ -64,9 +66,9 @@ python server.py
 | 手機透過 Tailscale 連回家 | 是（或用樹莓派） | 電腦執行 `python server.py`，再執行 `tailscale serve --bg 8765`，手機開 `https://<電腦名稱>.<tailnet>.ts.net`。只有你的 Tailscale 裝置連得到，而且是 HTTPS，可以加入主畫面 |
 | 同一個 Wi-Fi 的手機 | 是 | `python server.py --host 0.0.0.0 --password 你的密碼`，手機開畫面上顯示的網址 |
 | **Android 手機單獨執行** | **否** | 安裝 Termux，`pkg install git python`、clone 這個 repo，執行 `bash deploy/run-android.sh`，用手機 Chrome 開 `http://localhost:8765` |
-| 樹莓派／NAS 常駐 | 否（小主機一直開） | 參考 `deploy/tw-us-viewer.service`（systemd 開機自動執行），搭配 Tailscale |
-| Docker | 依主機而定 | `docker build -t tw-us-viewer .`，`docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=密碼 -v tw-us-data:/data tw-us-viewer` |
-| Windows 執行檔 | 是 | `py -m pip install pyinstaller` 後執行 `build_exe.bat`，產生 `dist\TWUSStockViewer.exe` |
+| 樹莓派／NAS 常駐 | 否（小主機一直開） | 參考 `deploy/nightmarket.service`（systemd 開機自動執行），搭配 Tailscale |
+| Docker | 依主機而定 | `docker build -t nightmarket .`，`docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=密碼 -v nightmarket-data:/data nightmarket` |
+| Windows 執行檔 | 是 | `py -m pip install pyinstaller` 後執行 `build_exe.bat`，產生 `dist\NightMarket.exe` |
 
 **加入主畫面（PWA）**：用 `localhost` 或 HTTPS（例如 Tailscale serve）開啟時，手機瀏覽器選單的「加入主畫面」會變成一個 App 圖示，全螢幕開啟。iPhone 用 Safari 的「分享 → 加入主畫面」。
 

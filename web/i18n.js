@@ -164,7 +164,7 @@ if (LANG === 'en') {
     if (!raf) raf = requestAnimationFrame(() => { raf = 0; const list = [...pending]; pending = new Set(); list.forEach((el) => el && i18nApply(el)); });
   });
   document.addEventListener('DOMContentLoaded', () => {
-    document.title = 'TW/US Stock Viewer';
+    document.title = 'NightMarket';
     i18nApply(document.body);
     mo.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['placeholder', 'title'] });
   });

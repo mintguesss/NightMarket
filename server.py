@@ -32,7 +32,7 @@ HOST = os.environ.get("HOST", "127.0.0.1")          # 0.0.0.0 = 讓同網路的�
 PASSWORD = os.environ.get("TWSTOCK_PASSWORD", "")   # 設定後非本機連線要輸入密碼
 FROZEN = getattr(sys, "frozen", False)
 ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_DATA = (os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "TWUSStockViewer")
+DEFAULT_DATA = (os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "NightMarket")
                 if FROZEN else os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("TWSTOCK_DATA", DEFAULT_DATA)
 PAPER_FILE = os.path.join(DATA_DIR, "paper.json")
@@ -1641,7 +1641,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def _deny(self):
         self.send_response(401)
-        self.send_header("WWW-Authenticate", 'Basic realm="tw-us-stock-viewer", charset="UTF-8"')
+        self.send_header("WWW-Authenticate", 'Basic realm="nightmarket", charset="UTF-8"')
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -1681,7 +1681,7 @@ class Handler(SimpleHTTPRequestHandler):
         codes = [c for c in q.get("codes", "").split(",") if c][:200]
         try:
             if u.path == "/api/ping":
-                self.send_json({"app": "tw-us-stock-viewer"})
+                self.send_json({"app": "nightmarket"})
             elif u.path == "/api/list":
                 self.send_json(list(stock_list().values()))
             elif u.path == "/api/quote":
@@ -1750,7 +1750,7 @@ class Handler(SimpleHTTPRequestHandler):
             elif u.path == "/api/config/notify":
                 self.send_json(config_set_notify(body))
             elif u.path == "/api/notify/test":
-                r = push("測試推播", "台美股看盤：推播設定成功 ✅", only=body.get("channel"))
+                r = push("測試推播", "NightMarket：推播設定成功 ✅", only=body.get("channel"))
                 self.send_json({"ok": bool(r) and all(v == "ok" for v in r.values()), "result": r or {"-": "沒有啟用中的管道"}})
             elif u.path == "/api/notify/send":
                 self.send_json({"result": push(body.get("title") or "提醒", body.get("text") or "")})
@@ -1791,7 +1791,7 @@ def _lan_ips():
 if __name__ == "__main__":
     import argparse
     import socket
-    ap = argparse.ArgumentParser(description="台美股看盤 後端")
+    ap = argparse.ArgumentParser(description="NightMarket 後端")
     ap.add_argument("--host", default=HOST, help="監聽位址，預設 127.0.0.1（只有本機）；0.0.0.0 讓同網路裝置連線")
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--password", default=PASSWORD, help="非本機連線需要的密碼（建議 --host 0.0.0.0 時設定）")

@@ -1,18 +1,18 @@
 # 在樹莓派／Linux 主機上開機自動執行（systemd）
 # 安裝：
-#   sudo cp deploy/tw-us-viewer.service /etc/systemd/system/
-#   sudo nano /etc/systemd/system/tw-us-viewer.service   # 改 User 與 WorkingDirectory
-#   sudo systemctl enable --now tw-us-viewer
+#   sudo cp deploy/nightmarket.service /etc/systemd/system/
+#   sudo nano /etc/systemd/system/nightmarket.service   # 改 User 與 WorkingDirectory
+#   sudo systemctl enable --now nightmarket
 # 手機透過 Tailscale 連線：在這台主機執行 `tailscale serve --bg 8765`，
 # 之後用手機開 https://<主機名稱>.<你的 tailnet>.ts.net 即可（只有你的 Tailscale 裝置連得到）
 [Unit]
-Description=TW/US stock viewer
+Description=NightMarket stock terminal
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=pi
-WorkingDirectory=/home/pi/tw-us-stock-viewer
+WorkingDirectory=/home/pi/nightmarket
 ExecStart=/usr/bin/python3 server.py
 Restart=on-failure
 RestartSec=5
