@@ -2,7 +2,9 @@
 const GRID = '#1d212c', TXT = '#7d8494';
 let UP = '#f0444f', DOWN = '#17b978';
 const DEFAULT_WATCH = ['2330', '2317', '2454', '2308', '2382', '2303', '3711', '2881', '2412', '2603', '6488', '0050', '0056', '00878',
-  'US.NVDA', 'US.TSM', 'US.AAPL', 'US.MSFT', 'US.GOOGL', 'US.AMZN', 'US.META', 'US.TSLA', 'US.AVGO', 'US.MU', 'US.QQQ'];
+  'Y.CL=F', 'US.GOOGL', 'US.SPCX', 'US.SKHY', 'US.NOK', 'US.COHR', 'US.AAOI', 'US.LITE', 'US.SNDK', 'US.MU', 'US.WDC', 'US.STX', 'US.AMD', 'US.ARM',
+  'US.INTC', 'US.NVDA', 'US.TSLA', 'Y.BTC-USD'];
+const usCode = (c) => c.startsWith('US.') || c.startsWith('Y.');
 const FOOT_NAMES = { t00: '加權', o00: '櫃買', 'FUT.TXF': '台指期', 'US.^DJI': '道瓊', 'US.^IXIC': '那斯達克', 'US.^GSPC': '標普500', 'US.^SOX': '費半', 'Y.^VIX': 'VIX', 'Y.ES=F': '標普期', 'Y.NQ=F': '那指期', 'FX.USDTWD': '美元/台幣' };
 const FOOT_BY = { tw: ['t00', 'o00', 'FUT.TXF', 'FX.USDTWD'], us: ['US.^DJI', 'US.^IXIC', 'US.^GSPC', 'US.^SOX', 'Y.^VIX', 'Y.ES=F', 'Y.NQ=F', 'FX.USDTWD'] };
 const MKT_INDEX = { tw: 't00', us: 'US.^GSPC' };
@@ -42,8 +44,8 @@ const store = {
 // 舊版（台美混在一起）的自選清單拆成兩份
 if (!store.get('tw.watch.tw') && !store.get('tw.watch.us')) {
   const old = store.get('tw.watch', DEFAULT_WATCH);
-  store.set('tw.watch.tw', old.filter((c) => !c.startsWith('US.')));
-  store.set('tw.watch.us', old.filter((c) => c.startsWith('US.')).length ? old.filter((c) => c.startsWith('US.')) : DEFAULT_WATCH.filter((c) => c.startsWith('US.')));
+  store.set('tw.watch.tw', old.filter((c) => !usCode(c)));
+  store.set('tw.watch.us', old.filter(usCode).length ? old.filter(usCode) : DEFAULT_WATCH.filter(usCode));
 }
 const MKT0 = store.get('tw.mkt', 'tw');
 const state = {
@@ -90,12 +92,31 @@ const isUS = (c) => c.startsWith('US.');
 const isTW = (c) => !c.includes('.') && c !== 't00' && c !== 'o00';
 const isEtf = (c) => /^00/.test(c) || ['US.QQQ', 'US.SPY', 'US.VOO', 'US.SOXX', 'US.SMH', 'US.DIA', 'US.IWM', 'US.TQQQ', 'US.SOXL'].includes(c);
 const isOpt = (c) => c.startsWith('OPT.');
-const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : c.startsWith('Y.') ? c.slice(2) : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
+const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : c.startsWith('Y.') ? c.slice(2).replace(/=F$|-USD$/, '') : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
 const multOf = (c) => (c.startsWith('OPT.TW:') ? 50 : c.startsWith('OPT.US:') ? 100 : 1);
 const mktOf = (c) => (isUS(c) ? 'us' : state.listMap[c]?.mkt || state.quotes[c]?.mkt);
+// 常見美股、期貨、加密貨幣的中文名稱（台灣慣用譯名）；中文介面優先顯示
+const ZH_NAME = Object.fromEntries(Object.entries({
+  AAPL: '蘋果', MSFT: '微軟', NVDA: '輝達', GOOGL: '谷歌-A', GOOG: '谷歌-C', AMZN: '亞馬遜', META: 'Meta', TSLA: '特斯拉', AVGO: '博通', TSM: '台積電 ADR',
+  AMD: '超微', INTC: '英特爾', MU: '美光', QCOM: '高通', ARM: '安謀', ASML: '艾司摩爾', NFLX: '網飛', ORCL: '甲骨文', CRM: 'Salesforce', ADBE: 'Adobe',
+  CSCO: '思科', IBM: 'IBM', TXN: '德州儀器', AMAT: '應用材料', LRCX: '科林研發', KLAC: '科磊', MRVL: '邁威爾', SMCI: '美超微', DELL: '戴爾', HPQ: '惠普',
+  HPE: '慧與', PLTR: 'Palantir', COIN: 'Coinbase', MSTR: '微策略', UBER: 'Uber', ABNB: 'Airbnb', SHOP: 'Shopify', PYPL: 'PayPal', V: 'Visa', MA: '萬事達',
+  JPM: '摩根大通', BAC: '美國銀行', GS: '高盛', MS: '摩根士丹利', WFC: '富國銀行', C: '花旗', 'BRK-B': '波克夏-B', KO: '可口可樂', PEP: '百事', MCD: '麥當勞',
+  SBUX: '星巴克', NKE: 'Nike', DIS: '迪士尼', WMT: '沃爾瑪', COST: '好市多', HD: '家得寶', JNJ: '嬌生', PFE: '輝瑞', MRK: '默克', LLY: '禮來', NVO: '諾和諾德',
+  UNH: '聯合健康', ABBV: '艾伯維', XOM: '埃克森美孚', CVX: '雪佛龍', BA: '波音', CAT: '開拓重工', GE: '奇異', F: '福特', GM: '通用汽車', T: 'AT&T', VZ: 'Verizon',
+  BABA: '阿里巴巴', PDD: '拼多多', JD: '京東', BIDU: '百度', NIO: '蔚來', SONY: '索尼', TM: '豐田', NOK: '諾基亞', ERIC: '愛立信', COHR: 'Coherent',
+  AAOI: '應用光電', LITE: 'Lumentum', SNDK: '晟碟', WDC: '威騰電子', STX: '希捷', SKHY: 'SK 海力士', SPCX: 'SpaceX', ANET: 'Arista', VRT: 'Vertiv',
+  ON: '安森美', NXPI: '恩智浦', ADI: '亞德諾', MCHP: '微芯', SNPS: '新思科技', CDNS: '益華電腦', CRWD: 'CrowdStrike', PANW: 'Palo Alto', NET: 'Cloudflare',
+  SNOW: 'Snowflake', RKLB: '火箭實驗室', IONQ: 'IonQ', HOOD: 'Robinhood', SOFI: 'SoFi', ASTS: 'AST SpaceMobile', OKLO: 'Oklo', CEG: 'Constellation 能源',
+  VST: 'Vistra', UMC: '聯電 ADR', ASX: '日月光 ADR', CHT: '中華電 ADR', CRDO: 'Credo', ALAB: 'Astera Labs', CIEN: 'Ciena', GLW: '康寧', APH: '安費諾',
+  QQQ: '那斯達克 100 ETF', SPY: '標普 500 ETF', VOO: 'Vanguard 標普 500', SOXX: '費半 ETF', SMH: '半導體 ETF', DIA: '道瓊 ETF', IWM: '羅素 2000 ETF',
+  TQQQ: '三倍做多那指', SOXL: '三倍做多半導體', GLD: '黃金 ETF', TLT: '20 年期美債 ETF',
+}).map(([k, v]) => ['US.' + k, v]).concat([['Y.CL=F', 'WTI 原油期貨'], ['Y.BZ=F', '布蘭特原油'], ['Y.GC=F', '黃金期貨'], ['Y.SI=F', '白銀期貨'],
+  ['Y.NG=F', '天然氣期貨'], ['Y.ES=F', '標普期'], ['Y.NQ=F', '那指期'], ['Y.YM=F', '道瓊期'], ['Y.BTC-USD', '比特幣'], ['Y.ETH-USD', '以太幣'], ['Y.SOL-USD', 'Solana']]));
 const nameOf = (c) => {
   if (c === 't00') return '加權指數';
   const q = state.quotes[c];
+  if (!isTW(c) && LANG !== 'en' && ZH_NAME[c]) return ZH_NAME[c];
   if (!isTW(c)) return state.names[c] || q?.name || showCode(c);
   return state.listMap[c]?.name || q?.name || state.names[c] || c;
 };
@@ -772,7 +793,7 @@ function newsItem(n) {
   const t = ago == null ? '' : ago < 3600 ? `${Math.max(1, Math.round(ago / 60))} 分鐘前` : ago < 86400 ? `${Math.round(ago / 3600)} 小時前` : ago < 172800 ? '昨天 ' + new Date(n.time * 1000).toTimeString().slice(0, 5) : new Date(n.time * 1000).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
   // 英文新聞：中文介面時標題用翻譯、原文縮小放下面；翻譯失敗就附「翻譯」連結
   const en = LANG !== 'en' && n.title && !/[㐀-鿿]/.test(n.title);
-  const title = en && n.title_zh ? `<div class="t">${esc(n.title_zh)}</div><div class="orig">${esc(n.title)}</div>` : `<div class="t">${esc(n.title)}</div>`;
+  const title = en && n.title_zh ? `<div class="t" title="${esc(n.title)}">${esc(n.title_zh)}</div>` : `<div class="t">${esc(n.title)}</div>`; // 中文為主，英文原文放在滑鼠提示
   const trLink = en && !n.title_zh ? `<span class="tr-link" data-tr="${esc(n.title)}">翻譯</span>` : '';
   return `<a class="news-item" href="${esc(n.link)}" target="_blank" rel="noopener">${title}${n.summary ? `<div class="sm">${esc(n.summary)}</div>` : ''}<div class="m">${esc(n.publisher || '')}${n.cat ? '・' + esc(n.cat) : ''}　${t}${trLink}</div></a>`;
 }
@@ -864,6 +885,7 @@ $('#nav').addEventListener('click', (e) => {
   if (b.dataset.act === 'alerts') alertsPanel();
   if (b.dataset.act === 'index') { selectCode(MKT_INDEX[state.mkt]); setView('chart'); }
   if (b.dataset.act === 'settings') settingsPanel();
+  if (b.dataset.act === 'fullscreen') toggleFullscreen(document.documentElement);
   if (b.dataset.act === 'lang') setLang(LANG === 'en' ? 'zh' : 'en');
 });
 function settingsPanel() {
@@ -1070,6 +1092,15 @@ function appInit() {
   // 網址參數：#view=heatmap&mkt=us&code=2330（方便分享與截圖）
   const hp = new URLSearchParams(location.hash.slice(1));
   if (hp.get('mkt') && hp.get('mkt') !== state.mkt) switchMarket(hp.get('mkt'));
+  // #watch=US.GOOGL,US.NVDA,Y.BTC-USD：用網址一次換掉目前市場的自選清單（會先詢問）
+  if (hp.get('watch')) {
+    const list = [...new Set(hp.get('watch').split(',').map((c) => c.trim()).filter(Boolean))];
+    if (list.length && confirm(`要把${state.mkt === 'tw' ? '台股' : '美股'}自選清單換成這 ${list.length} 檔嗎？
+${list.map(showCode).join('、')}`)) {
+      state.watch = list; save('watch'); renderWatch(); renderSide(); refreshQuotes(); refreshSparks();
+    }
+    history.replaceState(null, '', location.pathname + location.search + '#' + [...hp].filter(([k]) => k !== 'watch').map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&'));
+  }
   if (hp.get('code')) selectCode(hp.get('code'));
   if (hp.get('period') && PERIODS[hp.get('period')]) setPeriod(hp.get('period'));
   if (hp.get('view')) setTimeout(() => setView(hp.get('view')), 300);
@@ -1104,3 +1135,30 @@ window.addEventListener('error', (e) => {
   if (!e.filename || !e.filename.startsWith(location.origin) || Date.now() - lastErrToast < 15000) return;
   lastErrToast = Date.now(); toast(`畫面發生錯誤：${e.message}（圖表異常可按右鍵 →「重設圖表」）`);
 });
+
+/* ---------- 全螢幕 ---------- */
+// 整個 App 或只有圖表全螢幕；不支援全螢幕 API 的瀏覽器（例如 iPhone Safari）改用隱藏周邊面板的方式
+function toggleFullscreen(el) {
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  const B = document.body.classList;
+  if (fsEl || B.contains('pseudo-fs')) {
+    B.toggle('pseudo-fs', false); B.toggle('chart-fs', false);
+    if (fsEl) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+    return;
+  }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (el !== document.documentElement) B.toggle('chart-fs', true);
+  const pseudo = () => { B.toggle('pseudo-fs', true); document.body.scrollLeft = 0; document.documentElement.scrollLeft = 0; setTimeout(() => window.dispatchEvent(new Event('resize')), 60); };
+  if (req) { const r = req.call(el); if (r && r.catch) r.catch(pseudo); } else pseudo();
+}
+['fullscreenchange', 'webkitfullscreenchange'].forEach((ev) => document.addEventListener(ev, () => {
+  const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if (!on) document.body.classList.toggle('chart-fs', false);
+  const chartOn = on && document.body.classList.contains('chart-fs');
+  $('#chartFsBtn').textContent = chartOn ? '⤡ 離開全螢幕' : '⛶ 全螢幕';
+  $$('[data-act="fullscreen"] span').forEach((x) => (x.textContent = on && !chartOn ? '離開' : '全螢幕'));
+  setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+}));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('pseudo-fs')) toggleFullscreen(); });
+$('#chartFsBtn').addEventListener('click', () => toggleFullscreen($('#viewChart')));

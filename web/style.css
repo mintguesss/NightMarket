@@ -668,3 +668,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .info-hero .px { font-size: 26px; font-weight: 700; }
 .info-hero .meta { color: var(--muted); font-size: 12px; }
 .icard-h .itabs { margin: -4px 0; }
+
+/* 全螢幕 */
+#viewChart:fullscreen { background: var(--bg); display: flex !important; flex-direction: column; width: 100vw; height: 100vh; }
+#viewChart:-webkit-full-screen { background: var(--bg); display: flex !important; flex-direction: column; width: 100vw; height: 100vh; }
+/* 不支援全螢幕 API 時：隱藏周邊面板，只留中間 */
+body.pseudo-fs .app { display: block; }
+body.pseudo-fs .nav, body.pseudo-fs .watch, body.pseudo-fs .side, body.pseudo-fs .rail, body.pseudo-fs .foot, body.pseudo-fs .resizer { display: none !important; }
+body.pseudo-fs .center { height: 100vh; height: 100dvh; }
+body.pseudo-fs.chart-fs .topbar { display: none !important; }
+body.pseudo-fs { overflow: hidden; }

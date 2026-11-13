@@ -1168,13 +1168,13 @@ def stock_info(code, tr=False):
         info["news"] = add_translation(info["news"])
         if info.get("summary"):
             info["summary_zh"] = (translate_zh([info["summary"]]) or [None])[0]
-        # 產業別、經營團隊職稱也翻成中文（後面括號保留英文原文）
+        # 產業別、經營團隊職稱也翻成中文
         prof = [list(r) for r in info.get("profile") or []]
         offs = [list(r) for r in info.get("officers") or []]
         targets = [r for r in prof if r[0] == "產業" and r[1]] + [r for r in offs if r[1]]
         for r, zh in zip(targets, translate_zh([r[1] for r in targets])):
             if zh and zh != r[1]:
-                r[1] = f"{zh}（{r[1]}）"
+                r[1] = zh
         info["profile"], info["officers"] = prof, offs
     return info
 

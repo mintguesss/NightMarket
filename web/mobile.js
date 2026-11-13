@@ -47,6 +47,7 @@
         { label: '大盤走勢', icon: '↗', act: () => selectCode(MKT_INDEX[state.mkt]) },
         'sep',
         { label: '價格提醒', icon: '🔔', act: alertsPanel },
+        { label: '全螢幕', icon: '⛶', act: () => toggleFullscreen(document.documentElement) },
         { label: '設定', icon: '⚙', act: settingsPanel },
         { label: LANG === 'en' ? '中文' : 'English', icon: '🌐', act: () => setLang(LANG === 'en' ? 'zh' : 'en') },
       ]);

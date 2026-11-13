@@ -92,6 +92,8 @@ const I18N_EN = {
   'SAR 翻多': 'SAR flip', '收盤由下往上穿越 SAR 進場，跌破 SAR 出場': 'Close crosses above SAR; sell when it crosses below',
   'MFI 超賣＋OBV 轉強': 'MFI oversold + OBV', 'MFI < 20 且 OBV 站上均線進場，MFI > 80 出場': 'MFI < 20 and OBV above its average; sell when MFI > 80',
   '移動停損 %': 'Trailing stop %', '移動停損': 'Trailing stop', '從進場後的最高價回落這麼多 % 就賣出，讓獲利奔跑': 'Sell when price falls this % from its high since entry',
+  '全螢幕': 'Full screen', '⛶ 全螢幕': '⛶ Full screen', '⤡ 離開全螢幕': '⤡ Exit full screen', '離開': 'Exit',
+  '全螢幕（Esc 離開）': 'Full screen (Esc to exit)', '只有圖表全螢幕（Esc 離開）': 'Chart full screen (Esc to exit)',
   '英文原文': 'Original', '翻譯': 'Translate', '回到最新 K 棒': 'Go to latest bar', '重設圖表（重新載入）': 'Reset chart (reload)', '重新載入圖表': 'Reload chart',
   // 設定、對話框
   '漲跌顏色': 'Up/down colors', '紅漲綠跌（台灣習慣）': 'Red up / green down (Asia)', '綠漲紅跌（歐美習慣）': 'Green up / red down (Western)', '盤中更新頻率': 'Refresh rate',
