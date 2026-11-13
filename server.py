@@ -258,13 +258,14 @@ def yahoo_quote(code):
             if reg and t >= reg.get("start", 0) and q["open"][i] is not None:
                 opn = q["open"][i]
                 break
-        # 盤前/盤後價
+        # 盤前/盤後價：最後一筆不在正規時段內才算。今天盤前開始之前的價格是上一個交易日的盤後價
+        pre_p = (m.get("currentTradingPeriod") or {}).get("pre") or {}
         for i in range(len(ts) - 1, -1, -1):
             if q["close"][i] is not None:
                 t = ts[i]
                 if reg and (t >= reg.get("end", 1e18) or t < reg.get("start", 0)):
-                    ext = {"price": q["close"][i], "label": "盤後" if t >= reg.get("end", 1e18) else "盤前",
-                           "time": _fmt_local(t, off), "ts": t}
+                    is_pre = pre_p.get("start", 0) <= t < reg.get("start", 0)
+                    ext = {"price": q["close"][i], "label": "盤前" if is_pre else "盤後", "time": _fmt_local(t, off), "ts": t}
                 break
         rt = m.get("regularMarketTime")
         ctp = m.get("currentTradingPeriod") or {}

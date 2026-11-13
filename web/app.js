@@ -465,13 +465,14 @@ function renderWatch() {
   if (!codes.length) { el.innerHTML = '<div class="empty">這個分組沒有股票<br>用上方搜尋框加入，或右鍵股票加入分組</div>'; return; }
   el.innerHTML = codes.map((c) => {
     const q = state.quotes[c], { d, pct } = chgOf(q), k = cls(d), al = state.alerts[c];
-    const ext = S.showExt && q?.ext ? `<div class="wext">${q.ext.label} <span class="${cls(q.ext.price - q.price)}">${fmtP(q.ext.price)} ${sign(q.ext.price - q.price)}${(((q.ext.price - q.price) / q.price) * 100).toFixed(2)}%</span></div>` : '';
+    const x = S.showExt && q?.ext && q.price ? q.ext : null, xd = x ? x.price - q.price : 0, xk = cls(xd);
+    const pctTxt = q ? (S.pctBox ? `<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--';
     return `<div class="wrow ${c === state.code ? 'active' : ''} ${state.stars.includes(c) ? 'star' : ''} ${state.pinned.includes(c) ? 'pinned' : ''}" data-code="${esc(c)}">
       <div class="wname"><b>${esc(nameOf(c))}</b><small>${esc(showCode(c))}${al && (al.above || al.below || al.pctUp || al.pctDown) ? '<span class="walert">🔔</span>' : ''}</small>${state.notes[c] ? `<span class="wnote">${esc(state.notes[c])}</span>` : ''}</div>
       ${S.spark ? '<canvas></canvas>' : '<span></span>'}
-      <span class="num ${k}">${fmtP(q?.price)}</span>
-      <span class="num ${k}">${q ? (S.pctBox ? `<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--'}</span>
-      <span class="num ${k}">${q ? sign(d) + fmtP(d) : '--'}</span>${ext}</div>`;
+      <span class="num wp ${k}">${fmtP(q?.price)}${x ? `<small class="${xk}">${fmtP(x.price)}</small>` : ''}</span>
+      <span class="num wc ${k}">${pctTxt}${x ? `<small class="${xk}">${sign(xd)}${((xd / q.price) * 100).toFixed(2)}%<em>${esc(x.label)}</em></small>` : ''}</span>
+      <span class="num ${k}">${q ? sign(d) + fmtP(d) : '--'}</span></div>`;
   }).join('');
   if (S.spark) el.querySelectorAll('.wrow').forEach((r) => drawSpark(r.querySelector('canvas'), state.sparks[r.dataset.code]));
 }
@@ -925,7 +926,7 @@ $('#periods').addEventListener('click', (e) => {
 document.addEventListener('click', (e) => { if (!e.target.closest('#morePeriods')) $('#moreMenu').classList.remove('open'); });
 
 /* ---------- 資料更新 ---------- */
-let quoteBusy = false;
+let quoteBusy = false, quotePending = false;
 async function refreshFutures() {
   try {
     const list = await api('/api/futures'); const near = list.find((r) => /^TXF[A-L]\d-F$/.test(r.id));
@@ -934,7 +935,8 @@ async function refreshFutures() {
   } catch {}
 }
 async function refreshQuotes() {
-  if (quoteBusy) return; quoteBusy = true;
+  if (quoteBusy) { quotePending = true; return; } // 進行中就排一次補抓（例如切換市場時）
+  quoteBusy = true;
   const pos = state.paper ? Object.keys(state.paper.positions) : [], pend = state.paper ? state.paper.orders.filter((o) => o.status === 'pending').map((o) => o.code) : [];
   const mine = (c) => ccyOf(c) === (state.mkt === 'tw' ? 'TWD' : 'USD');
   const codes = [...new Set([...state.watch, state.code, ...pos.filter(mine), ...pend.filter(mine), ...Object.keys(state.alerts).filter(mine), ...FOOT_BY[state.mkt].filter((c) => c !== 'FUT.TXF')])];
@@ -945,6 +947,7 @@ async function refreshQuotes() {
     if (state.view === 'chart') liveUpdate(); else PAGES[state.view]?.tick?.();
   } catch (e) { console.warn('quote', e); }
   quoteBusy = false;
+  if (quotePending) { quotePending = false; refreshQuotes(); }
 }
 async function refreshSparks() { try { Object.assign(state.sparks, await api('/api/spark?codes=' + state.watch.map(encodeURIComponent).join(','))); renderWatch(); } catch (e) { console.warn('spark', e); } }
 function selectCode(code) {

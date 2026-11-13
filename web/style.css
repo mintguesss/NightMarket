@@ -352,17 +352,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   body[data-mpage="list"] .center > .view { display: none !important; }
   body[data-mpage="list"] .watch { display: flex; flex: 1; min-height: 0; order: 2; }
   .watch-head { padding: 8px 14px 4px; }
-  .watch-cols, .wrow { grid-template-columns: minmax(0, 1fr) 92px 84px; column-gap: 10px; padding: 0 14px; }
-  .watch-cols span:nth-child(2), .watch-cols span:nth-child(5), .wrow > :nth-child(2), .wrow > :nth-child(5) { display: none; }
+  .watch-cols, .wrow { grid-template-columns: minmax(0, 1fr) 62px 84px 76px; column-gap: 8px; padding: 0 14px; }
+  .watch-cols span:nth-child(5), .wrow > :nth-child(5) { display: none; }
   .wrow { min-height: 58px; }
   .wname b { font-size: 15.5px; }
   .wrow > .num:nth-child(3) { font-size: 15.5px; }
-  .wrow > span.num:nth-child(4) { border-radius: 4px; padding: 7px 4px; text-align: center; color: #fff !important; font-size: 14px; font-weight: 600; }
-  .wrow > span.num.up:nth-child(4) { background: var(--up); }
-  .wrow > span.num.down:nth-child(4) { background: var(--down); }
-  .wrow > span.num.flat:nth-child(4) { background: #3a4050; }
-  .wrow .pctbox { padding: 0; background: none !important; min-width: 0; }
-  .wext { grid-column: 2 / 4; }
 
   /* 個股頁：報價 → 圖表 → 分頁 */
   body[data-mpage="detail"] .app { overflow-y: auto; }
@@ -509,4 +503,22 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   .m-mkt .mk { width: 34px; height: 34px; font-size: 15px; border-radius: 9px; }
   .m-mkt .sw { top: 21px; right: -3px; }
   body[data-mpage="detail"] .m-mkt { display: none; }
+}
+
+/* 自選清單：價格／漲跌幅下方第二行顯示盤前盤後 */
+.wrow .wp small, .wrow .wc small { display: block; font-size: 11px; margin-top: 2px; opacity: .9; white-space: nowrap; }
+.wrow .wc small em { font-style: normal; font-size: 9px; color: var(--muted); background: #2a3040; border-radius: 3px; padding: 0 3px; margin-left: 3px; vertical-align: 1px; }
+.wrow canvas { justify-self: center; }
+.watch-cols span:nth-child(2)::before { content: "走勢"; }
+@media (max-width: 820px) {
+  .wrow { min-height: 62px; }
+  .wrow canvas { width: 58px; height: 30px; }
+  .wrow > .num:nth-child(3), .wrow > .num:nth-child(4) { font-size: 16px; font-weight: 500; }
+  .wrow .wp small, .wrow .wc small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .wrow .wp small.up, .wrow .wc small.up { color: var(--up); } .wrow .wp small.down, .wrow .wc small.down { color: var(--down); }
+  .chips { gap: 18px; border-bottom: 0; padding: 4px 14px 8px; }
+  .chip { border: 0; padding: 4px 0; font-size: 15px; color: var(--muted); border-radius: 0; }
+  .chip.active { color: var(--text); font-weight: 700; box-shadow: inset 0 -3px 0 var(--accent); }
+  .chip.add { border: 0; }
+  .watch-cols { height: 30px; font-size: 12px; border-bottom: 1px solid var(--line); }
 }
