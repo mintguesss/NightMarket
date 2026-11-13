@@ -32,7 +32,18 @@ const R = (a, op, b) => ({ a, op, b });
 const C = (k, n) => (n ? { k, n } : { k }), V = (v) => ({ k: 'value', v });
 
 /* ---------- 策略 ---------- */
+// 依 10 年日 K 回測調整過的範本（研究見 README「策略研究」）：research 欄位會顯示在範本說明裡
+const DIP_TW = [R(C('chg_pct'), 'le', V(-3)), R(C('dist_hh', 20), 'le', V(-10)), R(C('rel_chg'), 'le', V(-4))];
 const STRAT_TEMPLATES = [
+  { name: '★ 台股逢低（只在大盤修正時）', desc: '單日跌 3%、距 20 日高點跌 10%、比 0050 多跌 4%，且大盤處於修正；持有 60 天或跌 15% 停損', mkt: 'tw', benchmark: '0050',
+    entry: { mode: 'all', rules: [...DIP_TW, R(C('regime'), 'lt', V(1))] }, exit: { mode: 'any', rules: [] }, stop_loss: 15, max_hold: 60,
+    research: '10 年、stock-watch 的 18 檔台股 AI／半導體股：20 天勝率 71%（任意一天 55%），比任意一天多 +6.5%；最近 4 個月崩跌期平均 −5.5%（原規則 −9.9%）' },
+  { name: '★ 美股強勢突破（類股站穩時）', desc: '收盤創 250 日新高、量 ≥ 20 日均量 1.5 倍，且 SOXX 在 50 日線上；跌破 MA20 出場（至少 5 天、最多 120 天）', mkt: 'us', benchmark: 'US.SOXX',
+    entry: { mode: 'all', rules: [R(C('close'), 'gt', C('hh', 250)), R(C('vol_ratio', 20), 'ge', V(1.5)), R(C('bench_ma_pct', 50), 'gt', V(0))] }, exit: { mode: 'any', rules: [R(C('close'), 'lt', C('ma', 20))] }, stop_loss: 0, min_hold: 5, max_hold: 120,
+    research: '10 年、15 檔美股 AI／半導體股：20 天勝率 63%（任意一天 56%），多 +4.2%，最大回撤約 −7.5%；原本的美股逢低規則幾乎沒有優勢（+0.4%）' },
+  { name: '★ 台股強勢突破', desc: '收盤創 250 日新高、量 ≥ 20 日均量 1.5 倍；跌破 MA20 出場（至少 5 天、最多 120 天）', mkt: 'tw', benchmark: '0050',
+    entry: { mode: 'all', rules: [R(C('close'), 'gt', C('hh', 250)), R(C('vol_ratio', 20), 'ge', V(1.5))] }, exit: { mode: 'any', rules: [R(C('close'), 'lt', C('ma', 20))] }, stop_loss: 0, min_hold: 5, max_hold: 120,
+    research: '10 年、18 檔台股 AI／半導體股：20 天比任意一天多 +3.4%、60 天多 +7.9%，最大回撤約 −9%' },
   { name: '均線黃金交叉', desc: 'MA20 上穿 MA60 進場，下穿出場', entry: { mode: 'all', rules: [R(C('ma', 20), 'cross_up', C('ma', 60))] }, exit: { mode: 'any', rules: [R(C('ma', 20), 'cross_down', C('ma', 60))] }, stop_loss: 10 },
   { name: 'RSI 超賣反彈', desc: 'RSI 由下往上穿越 30 進場，大於 70 出場', entry: { mode: 'all', rules: [R(C('rsi', 14), 'cross_up', V(30))] }, exit: { mode: 'any', rules: [R(C('rsi', 14), 'gt', V(70))] }, stop_loss: 8 },
   { name: '布林下軌反彈', desc: '收盤由下往上穿越布林下軌進場，碰上軌出場', entry: { mode: 'all', rules: [R(C('close'), 'cross_up', C('boll_dn', 20))] }, exit: { mode: 'any', rules: [R(C('close'), 'gt', C('boll_up', 20))] }, stop_loss: 8 },
@@ -53,13 +64,15 @@ const STRAT_TEMPLATES = [
 const stState = { list: [], cur: null, result: null, chart: null, years: 2, lastEvent: store.get('tw.lastEvent', 0) };
 function newStrategy(tpl = {}) {
   return JSON.parse(JSON.stringify({ name: (LANG === 'en' && tpl.name ? I18N_EN[tpl.name] : tpl.name) || (LANG === 'en' ? 'My strategy' : '我的策略'), mkt: state.mkt, universe: state.watch.slice(0, 5), entry: tpl.entry || { mode: 'all', rules: [] },
-    exit: tpl.exit || { mode: 'any', rules: [] }, stop_loss: tpl.stop_loss ?? 8, take_profit: tpl.take_profit ?? 0, trailing_stop: tpl.trailing_stop ?? 0, max_hold: tpl.max_hold ?? 0, size_pct: 100, enabled: false, alert: true, auto_trade: false }));
+    exit: tpl.exit || { mode: 'any', rules: [] }, stop_loss: tpl.stop_loss ?? 8, take_profit: tpl.take_profit ?? 0, trailing_stop: tpl.trailing_stop ?? 0, max_hold: tpl.max_hold ?? 0,
+    min_hold: tpl.min_hold ?? 0, atr_stop: tpl.atr_stop ?? 0, cooldown: tpl.cooldown ?? 0, benchmark: tpl.mkt === state.mkt ? tpl.benchmark || '' : '', size_pct: 100, enabled: false, alert: true, auto_trade: false }));
 }
 PAGES.strategy = {
   async load() {
     await loadOperands();
     stState.list = await api('/api/strategies').catch(() => []);
-    $('#stTemplates').innerHTML = STRAT_TEMPLATES.map((t, i) => `<button class="preset" data-tpl="${i}" title="${esc(t.desc)}"><b>${esc(t.name)}</b><small>${esc(t.desc)}</small></button>`).join('');
+    $('#stTemplates').innerHTML = STRAT_TEMPLATES.filter((t) => !t.mkt || t.mkt === state.mkt).map((t) => `<button class="preset" data-tpl="${STRAT_TEMPLATES.indexOf(t)}" title="${esc(t.desc + (t.research ? '\n\n' + t.research : ''))}"><b>${esc(t.name)}</b><small>${esc(t.desc)}</small>${t.research ? `<small class="tpl-research">📊 ${esc(t.research)}</small>` : ''}</button>`).join('');
+    this.regime();
     this.renderList(); this.events();
     if (stState.cur && stState.cur.mkt !== state.mkt) stState.cur = null;
     if (!stState.cur) { const first = stState.list.find((x) => x.mkt === state.mkt); if (first) stState.cur = JSON.parse(JSON.stringify(first)); }
@@ -71,6 +84,12 @@ PAGES.strategy = {
       this.renderEditor(); this.run();
     }
   },
+  async regime() {
+    const r = await api('/api/regime?mkt=' + state.mkt).catch(() => null);
+    let el = $('#stRegime');
+    if (!el) { el = document.createElement('div'); el.id = 'stRegime'; el.className = 'st-regime'; $('#stList').before(el); }
+    el.innerHTML = r?.regime == null ? '' : `<span class="dot ${r.regime ? 'up' : 'down'}"></span>市場環境：<b>${esc(r.label.split('（')[0])}</b><div class="muted small">${esc((r.label.match(/（(.+)）/) || [])[1] || '')}</div>`;
+  },
   renderList() {
     const mine = stState.list.filter((x) => x.mkt === state.mkt);
     $('#stList').innerHTML = mine.length ? mine.map((x) => `<div class="st-item ${stState.cur?.id === x.id ? 'active' : ''}" data-id="${x.id}">
@@ -79,7 +98,7 @@ PAGES.strategy = {
   },
   async events() {
     const ev = await api('/api/strategy/events').catch(() => []);
-    $('#stEvents').innerHTML = ev.filter((e) => (state.mkt === 'tw') === isTW(e.code)).slice(0, 30).map((e) => `<div class="st-ev" data-code="${esc(e.code)}"><span class="tag ${e.kind === 'entry' ? 'buy' : 'sell'}">${e.kind === 'entry' ? '進場' : '出場'}</span> <b>${esc(e.name)}</b> <span class="num">${fmtP(e.price)}</span><div class="muted small">${esc(e.strategy)}　${new Date(e.t * 1000).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${e.trade ? '　' + esc(e.trade) : ''}</div></div>`).join('') || '<div class="muted small">還沒有訊號。啟用策略後，盤中每分鐘檢查一次。</div>';
+    $('#stEvents').innerHTML = ev.filter((e) => (state.mkt === 'tw') === isTW(e.code)).slice(0, 30).map((e) => `<div class="st-ev" data-code="${esc(e.code)}"><span class="tag ${e.kind === 'entry' ? 'buy' : 'sell'}">${e.kind === 'entry' ? '進場' : '出場'}</span> <b>${esc(e.name)}</b> <span class="num">${fmtP(e.price)}</span><div class="muted small">${esc(e.strategy)}　${new Date(e.t * 1000).toLocaleString('zh-TW', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}${e.trade ? '　' + esc(e.trade) : ''}</div>${evStat(e)}</div>`).join('') || '<div class="muted small">還沒有訊號。啟用策略後，盤中每分鐘檢查一次。</div>';
   },
   renderEditor() {
     const el = $('#stEditor'), st = stState.cur;
@@ -100,7 +119,11 @@ PAGES.strategy = {
         <label>停利 %<input class="tin" data-k="take_profit" type="number" step="any" value="${st.take_profit ?? 0}"></label>
         <label title="從進場後的最高價回落這麼多 % 就賣出，讓獲利奔跑">移動停損 %<input class="tin" data-k="trailing_stop" type="number" step="any" value="${st.trailing_stop ?? 0}"></label>
         <label>最長持有天數<input class="tin" data-k="max_hold" type="number" value="${st.max_hold ?? 0}"></label>
-        <label>每次投入資金 %<input class="tin" data-k="size_pct" type="number" value="${st.size_pct ?? 100}"></label></div>
+        <label>每次投入資金 %<input class="tin" data-k="size_pct" type="number" value="${st.size_pct ?? 100}"></label>
+        <label title="進場價減掉 N 倍 ATR(14) 就停損：波動大的股票停損放寬、波動小的收緊">ATR 停損（倍）<input class="tin" data-k="atr_stop" type="number" step="any" value="${st.atr_stop ?? 0}"></label>
+        <label title="持有未滿這麼多天，出場條件先不理會（停損仍有效）">最短持有天數<input class="tin" data-k="min_hold" type="number" value="${st.min_hold ?? 0}"></label>
+        <label title="停損出場後，這麼多天內不再買同一檔，避免一直接刀">停損後冷卻天數<input class="tin" data-k="cooldown" type="number" value="${st.cooldown ?? 0}"></label>
+        <label title="「比大盤」「市場環境」這類條件用哪一檔當大盤">比較大盤<select class="tin" data-s="benchmark">${(st.mkt === 'tw' ? [['', '0050（預設）'], ['t00', '加權指數'], ['00881', '00881 國泰台灣5G+'], ['0052', '0052 富邦科技']] : [['', 'SPY 標普 500（預設）'], ['US.QQQ', 'QQQ 那斯達克 100'], ['US.SOXX', 'SOXX 費城半導體'], ['US.SMH', 'SMH 半導體']]).map(([v, n]) => `<option value="${v}" ${(st.benchmark || '') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
         <div class="muted small">0 代表不使用。回測時資金平均分給股票池每一檔。</div></div>
       <div class="st-card"><div class="st-card-h">監控與執行</div>
         <label class="chk big"><input type="checkbox" data-b="enabled" ${st.enabled ? 'checked' : ''}> 啟用策略（交易時段每分鐘檢查一次，網頁關掉也會繼續）</label>
@@ -133,6 +156,7 @@ PAGES.strategy = {
     box.innerHTML = `<div class="bt-cards">${cards.map(([k, v]) => `<div><span>${k}</span><b class="num">${v}</b></div>`).join('')}</div>
       <div class="muted small" style="margin:6px 0">${verdict}　期間 ${fmtP(m.years, 1)} 年，最終資產 ${fmtP(m.final, 0)}</div>
       <div class="bt-chart" id="btChart"></div><div class="ilegend"><i class="pos"></i>策略　<i class="est"></i>買進持有（同資金）</div>
+      ${statsTable(d.stats, d.names)}
       <div class="sub-h">各股表現</div><table class="tbl mini"><thead><tr><th class="l">股票</th><th>報酬</th><th>買進持有</th><th>最大回撤</th><th>交易</th><th>勝率</th></tr></thead><tbody>
       ${(d.per_code || []).map((p) => `<tr data-code="${esc(p.code)}"><td class="l">${esc(showCode(p.code))} ${esc(d.names?.[p.code] || nameOf(p.code))}</td><td class="num">${pct(p.metrics.total_return)}</td><td class="num">${pct(p.metrics.bench_return)}</td><td class="num down">${fmtP(p.metrics.max_drawdown)}%</td><td class="num">${p.trades}</td><td class="num">${fmtP(p.metrics.win_rate)}%</td></tr>`).join('')}</tbody></table>
       <div class="sub-h">交易紀錄（最近 ${Math.min(100, (d.trades || []).length)} 筆）</div><table class="tbl mini"><thead><tr><th class="l">股票</th><th class="l">買進日</th><th class="l">賣出日</th><th>買價</th><th>賣價</th><th>報酬</th><th>天數</th><th class="l">原因</th></tr></thead><tbody>
@@ -166,9 +190,28 @@ $('#stEditor').addEventListener('click', async (e) => {
 $('#stEditor').addEventListener('change', (e) => {
   const st = stState.cur; if (!st) return;
   if (e.target.dataset.k) st[e.target.dataset.k] = +e.target.value;
+  if (e.target.dataset.s) st[e.target.dataset.s] = e.target.value;
   if (e.target.dataset.b) st[e.target.dataset.b] = e.target.checked;
 });
 $('#stEditor').addEventListener('keydown', (e) => { if (e.target.id === 'stAdd' && e.key === 'Enter') $('#stAddBtn').click(); });
+// 歷史訊號統計：進場條件剛成立的日子，之後 N 天的表現，和「任意一天進場」比較
+function evStat(e) {
+  const x = e.stats?.per?.[e.code]?.[20] || e.stats?.per?.[e.code]?.['20'];
+  if (!x || !x.n) return '';
+  return `<div class="muted small">本檔過去 ${x.n} 次：20 天勝率 ${Math.round(x.win * 100)}%、平均 ${sign(x.avg)}${(x.avg * 100).toFixed(1)}%${x.n < 15 ? '（樣本少）' : ''}</div>`;
+}
+function statsTable(sx, names = {}) {
+  if (!sx || !sx.all) return '';
+  const H = sx.horizons || [5, 20, 60], P = (v) => (v == null ? '-' : `<span class="${cls(v)}">${sign(v)}${(v * 100).toFixed(1)}%</span>`);
+  const cell = (x, base) => !x || !x.n ? '<td class="num muted">-</td><td class="num muted">-</td><td class="num muted">-</td>'
+    : `<td class="num">${x.n}${x.n < 15 ? ' <span class="warn" title="樣本少於 15，參考價值低">⚠</span>' : ''}</td><td class="num" title="95% 區間 ${Math.round(x.win_lo * 100)}%～${Math.round(x.win_hi * 100)}%">${Math.round(x.win * 100)}%</td><td class="num">${P(x.avg - (base?.avg ?? 0))}</td>`;
+  const head = `<tr><th class="l" rowspan="2">股票</th>${H.map((h) => `<th colspan="3">之後 ${h} 天</th>`).join('')}</tr><tr>${H.map(() => '<th>次數</th><th>勝率</th><th title="訊號平均報酬 − 任意一天進場平均報酬">多賺</th>').join('')}</tr>`;
+  const row = (label, per, cls_ = '') => `<tr class="${cls_}"><td class="l">${label}</td>${H.map((h) => cell(per[h] || per[String(h)], sx.base[h] || sx.base[String(h)])).join('')}</tr>`;
+  const base = `<tr class="muted"><td class="l">任意一天進場（對照）</td>${H.map((h) => { const b = sx.base[h] || sx.base[String(h)] || {}; return `<td class="num">${b.n || '-'}</td><td class="num">${b.n ? Math.round(b.win * 100) + '%' : '-'}</td><td class="num">${b.n ? P(b.avg) + '<small> 平均</small>' : '-'}</td>`; }).join('')}</tr>`;
+  const per = Object.entries(sx.per || {}).map(([c, v]) => row(`${esc(showCode(c))} ${esc(names[c] || nameOf(c))}`, v)).join('');
+  return `<div class="sub-h">歷史訊號統計 <span class="muted small">進場條件「剛成立」的日子，隔天開盤買、持有 N 天的結果（已扣費用 ${(sx.cost * 100).toFixed(1)}%）。「多賺」= 比任意一天進場多賺多少；過去統計不代表未來。</span></div>
+    <div class="tbl-scroll"><table class="tbl mini stats-tbl"><thead>${head}</thead><tbody>${row('<b>全部合併</b>', sx.all, 'hl')}${base}${per}</tbody></table></div>`;
+}
 // 背景訊號：每 30 秒看有沒有新觸發，跳出提示
 setInterval(async () => {
   const ev = await api('/api/strategy/events?since=' + stState.lastEvent).catch(() => []);
@@ -382,13 +425,24 @@ async function notifyPanel() {
     <div class="np"><label class="chk big"><input type="checkbox" id="npDcOn" ${c.discord.enabled ? 'checked' : ''}> <b>Discord</b></label>
       <div class="fld"><label>Webhook 網址</label><input id="npDcHook" value="${esc(c.discord.webhook || '')}" placeholder="頻道設定 → 整合 → Webhook"></div>
       <button class="btn-ghost" data-test="discord">送出測試</button></div>
+    <div class="np"><b>通知內容</b>
+      <div class="fld"><label>網頁網址</label><input id="npBase" value="${esc(c.base_url || '')}" placeholder="例如 https://你的電腦.ts.net:8766（點通知就會打開那一檔的圖表）"></div>
+      <div class="fld"><label>推播方式</label><select id="npMode">${[['both', '盤中即時＋收盤摘要'], ['instant', '只有盤中即時'], ['summary', '只有收盤摘要（盤中不打擾）']].map(([v, n]) => `<option value="${v}" ${(c.mode || 'both') === v ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+      <div class="hint">同一次檢查、同一個策略的訊號會合併成一則；每檔附上它自己過去的勝率與報酬。</div>
+      <button class="btn-ghost" data-sum="tw">送出台股收盤摘要</button> <button class="btn-ghost" data-sum="us">送出美股收盤摘要</button></div>
     <div class="hint">LINE Notify 已於 2025 年停止服務，所以沒有提供。</div>`,
     [{ label: '取消' }, { label: '儲存', act: async (m) => { const r = await post('/api/config/notify', collect(m)); toast(r.msg); } }]);
   function collect(m) {
     return { ntfy: { enabled: m.querySelector('#npNtfyOn').checked, topic: m.querySelector('#npNtfyTopic').value, server: m.querySelector('#npNtfyServer').value },
       telegram: { enabled: m.querySelector('#npTgOn').checked, token: m.querySelector('#npTgToken').value, chat_id: m.querySelector('#npTgChat').value },
-      discord: { enabled: m.querySelector('#npDcOn').checked, webhook: m.querySelector('#npDcHook').value } };
+      discord: { enabled: m.querySelector('#npDcOn').checked, webhook: m.querySelector('#npDcHook').value },
+      base_url: m.querySelector('#npBase').value, mode: m.querySelector('#npMode').value };
   }
+  m.querySelectorAll('[data-sum]').forEach((b) => b.addEventListener('click', async () => {
+    await post('/api/config/notify', collect(m));
+    const r = await post('/api/notify/summary', { mkt: b.dataset.sum });
+    toast(Object.keys(r.result || {}).length ? '✓ 收盤摘要已送出' : '沒有啟用中的推播管道', 4000);
+  }));
   m.querySelectorAll('[data-test]').forEach((b) => b.addEventListener('click', async () => {
     await post('/api/config/notify', collect(m));
     const r = await post('/api/notify/test', { channel: b.dataset.test });

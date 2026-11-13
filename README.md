@@ -77,6 +77,20 @@ Open <http://localhost:8765>. On Windows you can also double-click `start.bat` f
 
 Open it on a phone and use **Add to Home Screen** to get an app icon (PWA). Add `?lang=en` or `?lang=zh` to the URL to force a language, and `#view=heatmap` (or `strategy`, `screener`, `multi`, `calendar`…) to open a page directly.
 
+## Strategy research
+
+The ★ templates were tuned with this app's own engine on 10 years of daily bars (18 Taiwan and 15 US AI/semiconductor stocks).
+"Edge" is the signal's average return minus the average return of entering on *any* day in the same stocks, which removes most of the hindsight bias of a hand-picked list.
+
+| Rule | 20-day win rate (any day) | 20-day edge | Last 4 months (sector sell-off) |
+|---|---|---|---|
+| TW dip: −3% day, −10% from 20-day high, 4% worse than 0050 | 64% (55%) | +4.3% | −9.9% |
+| **… only while the market is in a correction** | **71%** (55%) | **+6.5%** | **−5.5%** |
+| US dip (same rule vs SPY) | 54% (56%) | +0.4% | −9.1% |
+| **US breakout: 250-day high on 1.5× volume, SOXX above its 50-day line** | **63%** (56%) | **+4.2%** | 2 trades, max drawdown −7.5% |
+
+Every dip rule lost money during the recent sell-off, single signals are close to coin flips, and the stock lists are survivors. Treat the numbers as a starting point, run the backtest on your own list, and look at the signal-history table before trusting a rule.
+
 ## Strategy format
 
 Strategies are plain JSON, so they are easy to share:

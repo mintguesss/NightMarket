@@ -220,20 +220,49 @@ OPERANDS = [
     {"k": "obv", "label": "OBV 能量潮", "en": "OBV"},
     {"k": "obv_ma", "label": "OBV 均線", "en": "OBV SMA", "n": 20},
     {"k": "sar", "label": "SAR 拋物線", "en": "Parabolic SAR"},
+    {"k": "rel_chg", "label": "當日漲跌 − 大盤(%)", "en": "Day change vs benchmark %"},
+    {"k": "rel_n", "label": "N 日報酬 − 大盤(%)", "en": "N-day return vs benchmark %", "n": 20},
+    {"k": "bench_chg", "label": "大盤當日漲跌(%)", "en": "Benchmark change %"},
+    {"k": "bench_ma_pct", "label": "大盤距 N 日均線(%)", "en": "Benchmark vs SMA %", "n": 200},
+    {"k": "regime", "label": "市場環境（1=多頭平穩，0=修正）", "en": "Market regime (1 = uptrend, 0 = correction)"},
     {"k": "value", "label": "數值", "en": "Value", "v": 0},
 ]
+BENCH_KEYS = {"rel_chg", "rel_n", "bench_chg", "bench_ma_pct", "regime"}
+
+
+def align_bench(bars, bench):
+    if not bench:
+        return None
+    by_day = {b["t"] // 86400: b["c"] for b in bench}
+    days = sorted(by_day)
+    out, j, last = [], 0, None
+    for b in bars:
+        d = b["t"] // 86400
+        while j < len(days) and days[j] <= d:
+            last = by_day[days[j]]; j += 1
+        out.append(last)
+    return out
+
+
+def regime_of(bc):
+    """大盤在 200 日線上且近 20 日上漲 = 1（多頭平穩），否則 0（修正）。"""
+    if not bc:
+        return []
+    m = sma(bc, 200)
+    return [None if m[i] is None or i < 20 or bc[i - 20] is None else (1.0 if bc[i] > m[i] and bc[i] > bc[i - 20] else 0.0) for i in range(len(bc))]
 OPS = {"gt": ">", "lt": "<", "ge": "≥", "le": "≤", "cross_up": "向上穿越", "cross_down": "向下穿越"}
 
 
 class Series:
     """一檔股票的日 K，指標結果快取起來重複使用。"""
 
-    def __init__(self, bars):
+    def __init__(self, bars, bench=None):
         self.bars = bars
         self.o = [b["o"] for b in bars]; self.h = [b["h"] for b in bars]
         self.l = [b["l"] for b in bars]; self.c = [b["c"] for b in bars]
         self.v = [float(b.get("v") or 0) for b in bars]
         self._cache = {}
+        self.bc = align_bench(bars, bench)  # 大盤收盤價（依日期對齊，缺的用前一天補）
 
     def get(self, op):
         k = op.get("k")
@@ -288,6 +317,20 @@ class Series:
         elif k == "obv": r = obv(c, self.v)
         elif k == "obv_ma": r = sma(obv(c, self.v), n or 20)
         elif k == "sar": r = sar(self.h, self.l)
+        elif k in BENCH_KEYS:
+            bc = self.bc
+            if not bc:
+                r = [None] * L
+            elif k == "bench_chg": r = [None] + [(bc[i] / bc[i - 1] - 1) * 100 if bc[i] and bc[i - 1] else None for i in range(1, L)]
+            elif k == "rel_chg":
+                r = [None] + [((c[i] / c[i - 1]) - (bc[i] / bc[i - 1])) * 100 if c[i - 1] and bc[i] and bc[i - 1] else None for i in range(1, L)]
+            elif k == "rel_n":
+                nn = n or 20
+                r = [((c[i] / c[i - nn]) - (bc[i] / bc[i - nn])) * 100 if i >= nn and c[i - nn] and bc[i] and bc[i - nn] else None for i in range(L)]
+            elif k == "bench_ma_pct":
+                m = sma([x if x is not None else 0 for x in bc], n or 200)
+                r = [None if m[i] is None or not bc[i] else (bc[i] / m[i] - 1) * 100 for i in range(L)]
+            else: r = regime_of([x if x is not None else 0 for x in bc])
         else: raise ValueError(f"不支援的指標：{k}")
         self._cache[key] = r
         return r
@@ -332,13 +375,18 @@ def fee_model(code, mkt):
     return lambda amt: 0.0, lambda amt: 0.0
 
 
-def backtest_one(code, bars, strat, capital):
+def backtest_one(code, bars, strat, capital, bench=None):
     """訊號以當天收盤判斷、隔天開盤成交（避免偷看未來）。停損停利以盤中最高最低觸發。"""
-    s = Series(bars)
+    s = Series(bars, bench)
     buy_fee, sell_fee = fee_model(code, strat.get("mkt", "tw"))
     sl, tp = float(strat.get("stop_loss") or 0) / 100, float(strat.get("take_profit") or 0) / 100
     max_hold = int(strat.get("max_hold") or 0)
     trail = float(strat.get("trailing_stop") or 0) / 100
+    atr_k = float(strat.get("atr_stop") or 0)
+    min_hold = int(strat.get("min_hold") or 0)
+    cooldown = int(strat.get("cooldown") or 0)
+    atr_v = atr(s.h, s.l, s.c, 14) if atr_k else None
+    atr_px, last_stop_i = 0.0, -10 ** 9
     peak = 0.0  # 進場後的最高價（移動停損用）
     size = float(strat.get("size_pct") or 100) / 100
     cash, shares, entry_px, entry_i, cost = capital, 0, 0.0, 0, 0.0
@@ -353,6 +401,8 @@ def backtest_one(code, bars, strat, capital):
                 amt = qty * b["o"]; f = buy_fee(amt)
                 cash -= amt + f; shares, entry_px, entry_i, cost = qty, b["o"], i, amt + f
                 peak = b["o"]
+                a0 = atr_v[i - 1] if atr_v and i > 0 else None
+                atr_px = b["o"] - atr_k * a0 if a0 else 0.0
         elif pending == "sell" and shares:
             cash, shares = _close(trades, code, bars, entry_i, i, entry_px, b["o"], shares, cost, sell_fee, cash, "出場條件")
         pending = None
@@ -361,6 +411,8 @@ def backtest_one(code, bars, strat, capital):
             reason, px = None, None
             if sl and b["l"] <= entry_px * (1 - sl):
                 reason, px = "停損", min(b["o"], entry_px * (1 - sl))
+            elif atr_px and b["l"] <= atr_px:
+                reason, px = "ATR 停損", min(b["o"], atr_px)
             elif trail and b["l"] <= peak * (1 - trail):
                 reason, px = "移動停損", min(b["o"], peak * (1 - trail))
             elif tp and b["h"] >= entry_px * (1 + tp):
@@ -369,12 +421,14 @@ def backtest_one(code, bars, strat, capital):
                 reason, px = "持有天數到期", b["c"]
             if reason:
                 cash, shares = _close(trades, code, bars, entry_i, i, entry_px, px, shares, cost, sell_fee, cash, reason)
+                if "停損" in reason:
+                    last_stop_i = i
             else:
                 peak = max(peak, b["h"])
         # 3) 收盤判斷訊號
-        if shares == 0 and s.group(strat.get("entry"), i):
+        if shares == 0 and i - last_stop_i > cooldown and s.group(strat.get("entry"), i):
             pending = "buy"
-        elif shares and (strat.get("exit") or {}).get("rules") and s.group(strat.get("exit"), i):
+        elif shares and i - entry_i >= min_hold and (strat.get("exit") or {}).get("rules") and s.group(strat.get("exit"), i):
             pending = "sell"
         equity.append([b["t"], cash + shares * b["c"]])
     if shares:  # 最後一天仍持有：以收盤價計算未平倉（標記）
@@ -418,15 +472,15 @@ def metrics(equity, trades, capital, bench=None):
     return m
 
 
-def backtest(strat, data, capital=1_000_000):
-    """data: {code: bars}。資金平均分配給每一檔，最後合併權益曲線。"""
+def backtest(strat, data, capital=1_000_000, bench=None):
+    """data: {code: bars}；bench: 大盤日 K（比較與市場環境條件用）。資金平均分配給每一檔，最後合併權益曲線。"""
     codes = [c for c in data if data[c]]
     if not codes:
         return {"error": "沒有可回測的資料"}
     per = capital / len(codes)
     results, all_trades, by_t, bench_t = [], [], {}, {}
     for code in codes:
-        r = backtest_one(code, data[code], strat, per)
+        r = backtest_one(code, data[code], strat, per, bench)
         bh = data[code][0]["c"]
         b_eq = [[b["t"], per * b["c"] / bh] for b in data[code]] if bh else []
         r["metrics"] = metrics(r["equity"], r["trades"], per, b_eq)
@@ -449,19 +503,82 @@ def backtest(strat, data, capital=1_000_000):
             "per_code": results, "trades": all_trades[:500], "capital": capital}
 
 
-def signal_now(bars, group):
+def signal_now(bars, group, bench=None):
     """最新一根 K 棒是否滿足條件（給提醒／自動下單用）。"""
     if not bars:
         return False
-    return Series(bars).group(group, len(bars) - 1)
+    return Series(bars, bench).group(group, len(bars) - 1)
 
 
-def explain(group, bars):
+def explain(group, bars, bench=None):
     """列出每條規則在最新一根的數值（給選股與提醒的說明）。"""
-    s = Series(bars)
+    s = Series(bars, bench)
     i = len(bars) - 1
     out = []
     for r in (group or {}).get("rules") or []:
         a, b = s.get(r["a"])[i], s.get(r["b"])[i]
         out.append({"text": f"{describe(r['a'])} {OPS.get(r['op'], r['op'])} {describe(r['b'])}", "a": a, "b": b, "ok": s.rule(r, i)})
     return out
+
+
+# ---------------- 歷史訊號統計 ----------------
+def _wilson(k, n, z=1.96):
+    if not n:
+        return None, None
+    p = k / n
+    d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return max(0.0, c - h), min(1.0, c + h)
+
+
+def signal_stats(strat, data, bench=None, horizons=(5, 20, 60), cost=None):
+    """進場條件「剛成立」的那些日子（前一天不成立），隔天開盤買、持有 h 天後收盤的報酬。
+    回傳每檔與全部合併的：樣本數、勝率（含 95% 區間）、平均報酬、比大盤多賺多少，以及任意一天進場的基準。
+    這是過去的統計，不代表未來勝率。"""
+    mkt = strat.get("mkt", "tw")
+    cost = (0.005 if mkt == "tw" else 0.001) if cost is None else cost
+    entry = strat.get("entry")
+    pooled = {h: {"r": [], "x": [], "base": []} for h in horizons}
+    per, recent = {}, []
+    for code, bars in data.items():
+        if len(bars) < 80:
+            continue
+        sr = Series(bars, bench)
+        bc = sr.bc
+        hit = [sr.group(entry, i) for i in range(len(bars))]
+        st = {h: {"r": [], "x": []} for h in horizons}
+        for i in range(1, len(bars) - 1):
+            for h in horizons:
+                j = i + h
+                if j >= len(bars) or not bars[i + 1]["o"]:
+                    continue
+                ret = bars[j]["c"] / bars[i + 1]["o"] - 1 - cost
+                bret = (bc[j] / bc[i + 1] - 1) if bc and bc[j] and bc[i + 1] else None
+                pooled[h]["base"].append(ret)
+                if hit[i] and not hit[i - 1]:
+                    st[h]["r"].append(ret)
+                    pooled[h]["r"].append(ret)
+                    if bret is not None:
+                        st[h]["x"].append(ret - bret)
+                        pooled[h]["x"].append(ret - bret)
+        for i in range(max(1, len(bars) - 60), len(bars)):
+            if hit[i] and not hit[i - 1]:
+                recent.append({"code": code, "t": bars[i]["t"], "c": bars[i]["c"], "now": bars[-1]["c"]})
+        per[code] = {h: _summ(st[h]["r"], st[h]["x"]) for h in horizons}
+    out = {"horizons": list(horizons), "cost": cost, "per": per,
+           "all": {h: _summ(pooled[h]["r"], pooled[h]["x"]) for h in horizons},
+           "base": {h: _summ(pooled[h]["base"], []) for h in horizons},
+           "recent": sorted(recent, key=lambda x: -x["t"])[:30]}
+    return out
+
+
+def _summ(rs, xs):
+    n = len(rs)
+    if not n:
+        return {"n": 0}
+    k = sum(1 for r in rs if r > 0)
+    lo, hi = _wilson(k, n)
+    srt = sorted(rs)
+    return {"n": n, "win": k / n, "win_lo": lo, "win_hi": hi, "avg": sum(rs) / n, "med": srt[n // 2],
+            "worst": srt[0], "excess": (sum(xs) / len(xs)) if xs else None}

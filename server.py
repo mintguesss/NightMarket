@@ -1363,7 +1363,8 @@ def config_public():
         return (v[:4] + "…" + v[-4:]) if isinstance(v, str) and len(v) > 10 else ("已設定" if v else "")
     return {"telegram": {"enabled": bool(c.get("telegram", {}).get("enabled")), "token": mask(c.get("telegram", {}).get("token")), "chat_id": c.get("telegram", {}).get("chat_id", "")},
             "discord": {"enabled": bool(c.get("discord", {}).get("enabled")), "webhook": mask(c.get("discord", {}).get("webhook"))},
-            "ntfy": {"enabled": bool(c.get("ntfy", {}).get("enabled")), "topic": c.get("ntfy", {}).get("topic", ""), "server": c.get("ntfy", {}).get("server", "https://ntfy.sh")}}
+            "ntfy": {"enabled": bool(c.get("ntfy", {}).get("enabled")), "topic": c.get("ntfy", {}).get("topic", ""), "server": c.get("ntfy", {}).get("server", "https://ntfy.sh")},
+            "base_url": c.get("base_url", ""), "mode": c.get("mode", "both")}
 
 
 def config_set_notify(body):
@@ -1378,6 +1379,10 @@ def config_set_notify(body):
                     v = body[ch].get(k)
                     if v is not None and "…" not in str(v) and v != "已設定":  # 遮罩值代表沒改
                         cur[k] = str(v).strip()
+        if "base_url" in body:
+            n["base_url"] = str(body.get("base_url") or "").strip()
+        if body.get("mode") in ("instant", "summary", "both"):
+            n["mode"] = body["mode"]
         _jsave(CONFIG_FILE, cfg)
     return {"ok": True, "msg": "推播設定已儲存"}
 
@@ -1392,21 +1397,30 @@ def _post(url, data, headers=None, form=False):
         return r.status
 
 
-def push(title, text, only=None):
-    """送到所有已啟用的推播管道。回傳每個管道的結果。"""
+def push(title, text, only=None, url=None, tags=None, priority=None):
+    """送到所有已啟用的推播管道。text 可用 **粗體**；url 是點通知要打開的網址。回傳每個管道的結果。"""
     n = config_get().get("notify", {})
     res = {}
+    plain = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     t = n.get("telegram", {})
     if t.get("enabled") and t.get("token") and t.get("chat_id") and (not only or only == "telegram"):
         try:
-            _post(f"https://api.telegram.org/bot{t['token']}/sendMessage", {"chat_id": t["chat_id"], "text": f"{title}\n{text}"}, form=True)
+            h = lambda x: x.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            body = f"<b>{h(title)}</b>\n\n" + re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", h(text))
+            if url:
+                body += f'\n\n<a href="{h(url)}">在 NightMarket 打開</a>'
+            _post(f"https://api.telegram.org/bot{t['token']}/sendMessage",
+                  {"chat_id": t["chat_id"], "text": body[:4000], "parse_mode": "HTML", "disable_web_page_preview": "true"}, form=True)
             res["telegram"] = "ok"
         except Exception as e:
             res["telegram"] = f"失敗：{e}"
     d = n.get("discord", {})
     if d.get("enabled") and d.get("webhook") and (not only or only == "discord"):
         try:
-            _post(d["webhook"], {"content": f"**{title}**\n{text}"})
+            emb = {"title": title[:250], "description": text[:4000], "color": {"buy": 0xF0444F, "sell": 0x17B978}.get(priority, 0xF5A524)}
+            if url:
+                emb["url"] = url
+            _post(d["webhook"], {"embeds": [emb]})
             res["discord"] = "ok"
         except Exception as e:
             res["discord"] = f"失敗：{e}"
@@ -1414,11 +1428,29 @@ def push(title, text, only=None):
     if f.get("enabled") and f.get("topic") and (not only or only == "ntfy"):
         try:
             server_ = (f.get("server") or "https://ntfy.sh").rstrip("/")
-            _post(f"{server_}/{urllib.parse.quote(f['topic'])}", text, headers={"Title": urllib.parse.quote(title), "Tags": "chart_with_upwards_trend"})
+            msg = {"topic": f["topic"], "title": title, "message": plain[:3800], "tags": tags or ["chart_with_upwards_trend"],
+                   "priority": 4 if priority in ("buy", "sell") else 3}
+            if url:
+                msg["click"] = url
+                msg["actions"] = [{"action": "view", "label": "打開圖表", "url": url}]
+            _post(server_, msg)  # JSON 發布：標題、中文、按鈕都不會變亂碼
             res["ntfy"] = "ok"
         except Exception as e:
             res["ntfy"] = f"失敗：{e}"
     return res
+
+
+def app_url(code=None, view=None):
+    """通知裡「打開圖表」的網址（推播設定裡填的網頁網址，例如 Tailscale 網址）。"""
+    base = (config_get().get("notify", {}).get("base_url") or "").strip().rstrip("/")
+    if not base:
+        return None
+    parts = []
+    if code:
+        parts += [f"mkt={'tw' if is_tw(code) else 'us'}", f"code={urllib.parse.quote(code)}"]
+    if view:
+        parts.append(f"view={view}")
+    return base + "/" + ("#" + "&".join(parts) if parts else "")
 
 
 # ---------------- 策略：存取、回測、監控 ----------------
@@ -1453,6 +1485,13 @@ def _daily(code, years=2):
     return (kline(code, "1d", rng) or {}).get("bars") or []
 
 
+DEFAULT_BENCH = {"tw": "0050", "us": "US.SPY"}
+
+
+def bench_of(st):
+    return st.get("benchmark") or DEFAULT_BENCH.get(st.get("mkt", "tw"), "0050")
+
+
 def run_backtest(body):
     st = body.get("strategy") or {}
     codes = [c for c in (st.get("universe") or []) if c][:20]
@@ -1471,7 +1510,10 @@ def run_backtest(body):
             data[code] = bars
     if not data:
         return {"error": "抓不到歷史資料"}
-    r = S.backtest(st, data, capital)
+    bench = _safe(lambda x: _daily(x, max(years, 5) if years != 10 else 10), bench_of(st), [])
+    r = S.backtest(st, data, capital, bench)
+    r["stats"] = S.signal_stats(st, data, bench)
+    r["benchmark"] = bench_of(st)
     r["names"] = {c: (stock_list().get(c) or {}).get("name") or c for c in data}
     return r
 
@@ -1490,7 +1532,21 @@ def _event_add(ev):
 _fired = {}  # (sid, code, kind, date) 一天只觸發一次
 
 
-def _live_bars(code):
+def _session_frac(code):
+    """目前交易時段已經過的比例（台股 09:00–13:30、美股 09:30–16:00 紐約時間），收盤後為 1。"""
+    if is_tw(code):
+        n = datetime.now(TW)
+        m = n.hour * 60 + n.minute - 9 * 60
+        return max(0.05, min(1.0, m / 270))
+    n = datetime.now(timezone.utc)
+    off = -4 if _us_dst(n.replace(tzinfo=None)) else -5
+    ny = n + timedelta(hours=off)
+    m = ny.hour * 60 + ny.minute - 9 * 60 - 30
+    return max(0.05, min(1.0, m / 390))
+
+
+def _live_bars(code, project=False):
+    """日 K 加上今天的即時報價。project=True 時盤中成交量依經過時間推估成全日量（量比條件才不會被低估）。"""
     bars = [dict(b) for b in _daily(code, 1)]
     q = quotes([code]).get(code)
     if not bars or not q or not q.get("price"):
@@ -1505,6 +1561,10 @@ def _live_bars(code):
                      "l": q.get("low") or q["price"], "c": q["price"], "v": vol})
     else:
         last.update(c=q["price"], h=max(last["h"], q.get("high") or q["price"]), l=min(last["l"], q.get("low") or q["price"]), v=max(last["v"], vol))
+    if project and q.get("isOpen"):
+        frac = _session_frac(code)
+        if frac < 1:
+            bars[-1]["v"] = bars[-1]["v"] / frac
     return bars, q
 
 
@@ -1515,9 +1575,91 @@ def _market_open(mkt):
     return bool(q and q.get("session") == "REGULAR")
 
 
+_stats_cache = {}  # (sid, 日期) -> signal_stats
+
+
+def _strategy_stats(st):
+    key = (st["id"], st.get("updated"), datetime.now(TW).strftime("%Y%m%d"))
+    if key not in _stats_cache:
+        codes = (st.get("universe") or [])[:30]
+        data = {c: b for c, b in zip(codes, POOL.map(lambda c: _safe(lambda x: _daily(x, 5), c, []), codes)) if len(b) > 80}
+        bench = _safe(lambda x: _daily(x, 5), bench_of(st), [])
+        _stats_cache.clear() if len(_stats_cache) > 50 else None
+        _stats_cache[key] = S.signal_stats(st, data, bench, horizons=(5, 20, 60))
+    return _stats_cache[key]
+
+
+def _pct(v, d=1):
+    return "-" if v is None else f"{v * 100:+.{d}f}%"
+
+
+def _stat_line(label, x, h=20):
+    x = (x or {}).get(h) or (x or {}).get(str(h)) or {}
+    if not x.get("n"):
+        return f"{label}：沒有歷史樣本"
+    warn = "（樣本少）" if x["n"] < 15 else ""
+    ex = f"，比大盤 {_pct(x['excess'])}" if x.get("excess") is not None else ""
+    return f"{label} {x['n']} 次{warn}：{h} 天勝率 {x['win'] * 100:.0f}%，平均 {_pct(x['avg'])}{ex}"
+
+
+try:
+    ZH_NAMES = json.load(open(os.path.join(ROOT, "web", "names-zh.json"), encoding="utf-8"))
+except Exception:
+    ZH_NAMES = {}
+
+
+def zh_name(code, fallback=None):
+    if is_tw(code):
+        return (stock_list().get(code) or {}).get("name") or fallback or code
+    return ZH_NAMES.get(code) or fallback or code
+
+
+def _fmt_signal_push(st, evs):
+    kind = evs[0]["kind"]
+    head = "📈 進場訊號" if kind == "entry" else "📉 出場訊號"
+    title = f"{head}｜{st.get('name')}" + (f"（{len(evs)} 檔）" if len(evs) > 1 else "")
+    blocks = []
+    for ev in evs:
+        q = ev.get("q") or {}
+        chg = (q["price"] / q["prev"] - 1) if q.get("price") and q.get("prev") else None
+        lines = [f"**{ev['name']} {ev['code'].replace('US.', '')}**　{ev['price']:,}" + (f"（{_pct(chg, 2)}）" if chg is not None else "")]
+        ok = [d["text"] for d in ev["detail"] if d.get("ok")]
+        lines.append("・條件：" + "；".join(ok))
+        stx = ev.get("stats")
+        if stx and kind == "entry":
+            lines.append("・" + _stat_line("本檔過去", stx["per"].get(ev["code"])))
+        if ev.get("trade"):
+            lines.append("・" + ev["trade"])
+        blocks.append("\n".join(lines))
+    foot = []
+    stx = evs[0].get("stats")
+    if stx and kind == "entry":
+        foot.append(_stat_line("這個策略在整個股票池", stx["all"]))
+        base = (stx.get("base") or {}).get(20) or {}
+        if base.get("n"):
+            foot.append(f"對照：任意一天進場，20 天平均 {_pct(base['avg'])}、勝率 {base['win'] * 100:.0f}%")
+    if evs[0].get("regime"):
+        foot.append(f"市場環境：{evs[0]['regime']}")
+    return title, "\n\n".join(blocks) + ("\n\n" + "\n".join(foot) if foot else "") + "\n\n（過去 5 年統計，不代表未來）"
+
+
+def market_regime(mkt):
+    code = DEFAULT_BENCH[mkt]
+    bars = _safe(lambda x: _daily(x, 2), code, [])
+    if len(bars) < 210:
+        return {"mkt": mkt, "bench": code, "regime": None}
+    c = [b["c"] for b in bars]
+    ma = sum(c[-200:]) / 200
+    chg20 = c[-1] / c[-21] - 1
+    up = c[-1] > ma and chg20 > 0
+    label = ("多頭平穩" if up else "修正") + f"（{'0050' if mkt == 'tw' else 'SPY'} 距 200 日線 {_pct(c[-1] / ma - 1)}、近 20 日 {_pct(chg20)}）"
+    return {"mkt": mkt, "bench": code, "regime": 1 if up else 0, "label": label, "vs_ma200": c[-1] / ma - 1, "chg20": chg20}
+
+
 def check_strategies(force=False):
     """檢查所有啟用中的策略；force=True 時不管是否開盤（手動「立即檢查」）。"""
     out = []
+    mode = config_get().get("notify", {}).get("mode", "both")
     for st in strategies_get():
         if not st.get("enabled") or not (st.get("alert") or st.get("auto_trade")):
             continue
@@ -1526,9 +1668,12 @@ def check_strategies(force=False):
         if not force and not live:
             continue
         codes = (st.get("universe") or [])[:30]
+        need_bench = any(r.get(side, {}).get("k") in S.BENCH_KEYS for g in (st.get("entry"), st.get("exit")) for r in ((g or {}).get("rules") or []) for side in ("a", "b"))
+        bench = _safe(lambda x: _live_bars(x)[0], bench_of(st), None) if need_bench else None
+        fired = []
         for code in codes:
             try:
-                bars, q = _live_bars(code)
+                bars, q = _live_bars(code, project=True)
             except Exception as e:
                 print("strategy data error:", code, e, file=sys.stderr)
                 continue
@@ -1541,7 +1686,7 @@ def check_strategies(force=False):
             if st.get("alert") and not st.get("auto_trade") and (st.get("exit") or {}).get("rules"):
                 checks = [("entry", st.get("entry")), ("exit", st.get("exit"))]
             for kind, grp in checks:
-                if not (grp or {}).get("rules") or not S.signal_now(bars, grp):
+                if not (grp or {}).get("rules") or not S.signal_now(bars, grp, bench):
                     continue
                 key = (st["id"], code, kind, day)
                 if key in _fired:
@@ -1550,15 +1695,15 @@ def check_strategies(force=False):
                 hold = bool(st.get("auto_trade")) and not live
                 if not hold:
                     _fired[key] = True
-                name = (q or {}).get("name") or code
+                name = zh_name(code, (q or {}).get("name"))
                 price = bars[-1]["c"]
                 ev = {"t": int(time.time()), "sid": st["id"], "strategy": st.get("name"), "code": code, "name": name,
-                      "kind": kind, "price": price, "detail": S.explain(grp, bars)}
-                trade_msg = ""
+                      "kind": kind, "price": price, "detail": S.explain(grp, bars, bench), "mkt": mkt}
                 if hold:
                     ev["trade"] = "非交易時段，未下單（開盤後監控會自動判斷）"
                     out.append(ev)
                     continue
+                trade_msg = ""
                 if st.get("auto_trade"):
                     ccy = ccy_of(code)
                     if kind == "entry" and not pos:
@@ -1572,13 +1717,75 @@ def check_strategies(force=False):
                         r = paper_order({"code": code, "side": "sell", "type": "market", "qty": pos["qty"]})
                         trade_msg = f"模擬賣出 {pos['qty']} 股：{r.get('msg')}"
                 ev["trade"] = trade_msg
-                _event_add(ev)
-                if st.get("alert"):
-                    cond = "；".join(d["text"] for d in ev["detail"])
-                    push(f"策略「{st.get('name')}」{'進場' if kind == 'entry' else '出場'}訊號",
-                         f"{name}（{code.replace('US.', '')}）價格 {price}\n條件：{cond}" + (f"\n{trade_msg}" if trade_msg else ""))
-                out.append(ev)
+                if kind == "entry":
+                    try:
+                        stx = _strategy_stats(st)
+                        ev["stats"] = {"per": {code: stx["per"].get(code)}, "all": stx["all"], "base": stx["base"]}
+                    except Exception as e:
+                        print("stats error:", e, file=sys.stderr)
+                _event_add({k: v for k, v in ev.items() if k != "q"})
+                ev["q"] = q
+                fired.append(ev)
+                out.append({k: v for k, v in ev.items() if k != "q"})
+        # 同一次檢查、同一個策略的訊號合併成一則推播（不洗版）
+        if fired and st.get("alert") and mode in ("instant", "both"):
+            reg = (_safe(market_regime, mkt, {}) or {}).get("label")
+            for kind in ("entry", "exit"):
+                evs = [e for e in fired if e["kind"] == kind]
+                if evs:
+                    for e in evs:
+                        e["regime"] = reg
+                    title, text = _fmt_signal_push(st, evs)
+                    push(title, text, url=app_url(evs[0]["code"]), tags=["chart_with_upwards_trend" if kind == "entry" else "chart_with_downwards_trend"],
+                         priority="buy" if kind == "entry" else "sell")
     return out
+
+
+def daily_summary(mkt, force=False):
+    """收盤摘要：今天每個訊號從提醒價到收盤價的變化、大盤漲跌、市場環境。"""
+    today = datetime.now(TW).date()
+    evs = [e for e in events_get() if e.get("mkt", "tw" if is_tw(e["code"]) else "us") == mkt
+           and datetime.fromtimestamp(e["t"], TW).date() >= today - timedelta(days=0 if mkt == "tw" else 1)
+           and (mkt == "tw" or e["t"] > time.time() - 18 * 3600)]
+    if not evs and not force:
+        return None
+    qs = quotes(list({e["code"] for e in evs} | {DEFAULT_BENCH[mkt]}))
+    bq = qs.get(DEFAULT_BENCH[mkt]) or {}
+    bchg = (bq["price"] / bq["prev"] - 1) if bq.get("price") and bq.get("prev") else None
+    lines = []
+    for e in sorted(evs, key=lambda e: e["t"]):
+        q = qs.get(e["code"]) or {}
+        now = q.get("price")
+        d = (now / e["price"] - 1) if now and e.get("price") else None
+        tag = "進場" if e["kind"] == "entry" else "出場"
+        lines.append(f"・{tag}　**{e['name']} {e['code'].replace('US.', '')}**　{e['price']:,} → {f'{now:,}' if now is not None else '-'}（{_pct(d)}）　{e['strategy']}")
+    reg = (_safe(market_regime, mkt, {}) or {}).get("label")
+    title = f"🌙 {'台股' if mkt == 'tw' else '美股'}收盤摘要：{len(evs)} 則訊號"
+    text = ("\n".join(lines) if lines else "今天沒有觸發任何策略。") + \
+        f"\n\n{'0050' if mkt == 'tw' else 'SPY'} 今日 {_pct(bchg, 2)}" + (f"\n市場環境：{reg}" if reg else "")
+    return push(title, text, url=app_url(view="strategy"), tags=["crescent_moon"])
+
+
+_summary_sent = {}
+
+
+def _maybe_summary():
+    mode = config_get().get("notify", {}).get("mode", "both")
+    if mode not in ("summary", "both"):
+        return
+    now_tw = datetime.now(TW)
+    if now_tw.weekday() < 5 and (now_tw.hour, now_tw.minute) >= (13, 40) and now_tw.hour < 18:
+        k = ("tw", now_tw.strftime("%Y%m%d"))
+        if k not in _summary_sent:
+            _summary_sent[k] = True
+            daily_summary("tw")
+    nu = datetime.now(timezone.utc)
+    ny = nu + timedelta(hours=-4 if _us_dst(nu.replace(tzinfo=None)) else -5)
+    if ny.weekday() < 5 and (ny.hour, ny.minute) >= (16, 10) and ny.hour < 20:
+        k = ("us", ny.strftime("%Y%m%d"))
+        if k not in _summary_sent:
+            _summary_sent[k] = True
+            daily_summary("us")
 
 
 def strategy_monitor():
@@ -1588,6 +1795,10 @@ def strategy_monitor():
             check_strategies()
         except Exception as e:
             print("strategy monitor error:", e, file=sys.stderr)
+        try:
+            _maybe_summary()
+        except Exception as e:
+            print("summary error:", e, file=sys.stderr)
 
 
 # ---------------- 市場快照（選股、熱力圖） ----------------
@@ -1822,6 +2033,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(cal_week(q["start"], q.get("mkt", "tw")))
             elif u.path == "/api/info":
                 self.send_json(stock_info(q["code"], q.get("tr") == "1"))
+            elif u.path == "/api/regime":
+                self.send_json(market_regime(q.get("mkt", "tw")))
             elif u.path == "/api/news":
                 n = news(q.get("code"))
                 self.send_json(add_translation(n) if q.get("tr") == "1" and q.get("code") and not is_tw(q["code"]) else n)
@@ -1857,6 +2070,8 @@ class Handler(SimpleHTTPRequestHandler):
             elif u.path == "/api/notify/test":
                 r = push("測試推播", "NightMarket：推播設定成功 ✅", only=body.get("channel"))
                 self.send_json({"ok": bool(r) and all(v == "ok" for v in r.values()), "result": r or {"-": "沒有啟用中的管道"}})
+            elif u.path == "/api/notify/summary":
+                self.send_json({"result": daily_summary(body.get("mkt", "tw"), force=True) or {}})
             elif u.path == "/api/notify/send":
                 self.send_json({"result": push(body.get("title") or "提醒", body.get("text") or "")})
             elif u.path == "/api/paper/order":

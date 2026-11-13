@@ -95,24 +95,9 @@ const isOpt = (c) => c.startsWith('OPT.');
 const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : c.startsWith('Y.') ? c.slice(2).replace(/=F$|-USD$/, '') : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
 const multOf = (c) => (c.startsWith('OPT.TW:') ? 50 : c.startsWith('OPT.US:') ? 100 : 1);
 const mktOf = (c) => (isUS(c) ? 'us' : state.listMap[c]?.mkt || state.quotes[c]?.mkt);
-// 常見美股、期貨、加密貨幣的中文名稱（台灣慣用譯名）；中文介面優先顯示
-const ZH_NAME = Object.fromEntries(Object.entries({
-  AAPL: '蘋果', MSFT: '微軟', NVDA: '輝達', GOOGL: '谷歌-A', GOOG: '谷歌-C', AMZN: '亞馬遜', META: 'Meta', TSLA: '特斯拉', AVGO: '博通', TSM: '台積電 ADR',
-  AMD: '超微', INTC: '英特爾', MU: '美光', QCOM: '高通', ARM: '安謀', ASML: '艾司摩爾', NFLX: '網飛', ORCL: '甲骨文', CRM: 'Salesforce', ADBE: 'Adobe',
-  CSCO: '思科', IBM: 'IBM', TXN: '德州儀器', AMAT: '應用材料', LRCX: '科林研發', KLAC: '科磊', MRVL: '邁威爾', SMCI: '美超微', DELL: '戴爾', HPQ: '惠普',
-  HPE: '慧與', PLTR: 'Palantir', COIN: 'Coinbase', MSTR: '微策略', UBER: 'Uber', ABNB: 'Airbnb', SHOP: 'Shopify', PYPL: 'PayPal', V: 'Visa', MA: '萬事達',
-  JPM: '摩根大通', BAC: '美國銀行', GS: '高盛', MS: '摩根士丹利', WFC: '富國銀行', C: '花旗', 'BRK-B': '波克夏-B', KO: '可口可樂', PEP: '百事', MCD: '麥當勞',
-  SBUX: '星巴克', NKE: 'Nike', DIS: '迪士尼', WMT: '沃爾瑪', COST: '好市多', HD: '家得寶', JNJ: '嬌生', PFE: '輝瑞', MRK: '默克', LLY: '禮來', NVO: '諾和諾德',
-  UNH: '聯合健康', ABBV: '艾伯維', XOM: '埃克森美孚', CVX: '雪佛龍', BA: '波音', CAT: '開拓重工', GE: '奇異', F: '福特', GM: '通用汽車', T: 'AT&T', VZ: 'Verizon',
-  BABA: '阿里巴巴', PDD: '拼多多', JD: '京東', BIDU: '百度', NIO: '蔚來', SONY: '索尼', TM: '豐田', NOK: '諾基亞', ERIC: '愛立信', COHR: 'Coherent',
-  AAOI: '應用光電', LITE: 'Lumentum', SNDK: '晟碟', WDC: '威騰電子', STX: '希捷', SKHY: 'SK 海力士', SPCX: 'SpaceX', ANET: 'Arista', VRT: 'Vertiv',
-  ON: '安森美', NXPI: '恩智浦', ADI: '亞德諾', MCHP: '微芯', SNPS: '新思科技', CDNS: '益華電腦', CRWD: 'CrowdStrike', PANW: 'Palo Alto', NET: 'Cloudflare',
-  SNOW: 'Snowflake', RKLB: '火箭實驗室', IONQ: 'IonQ', HOOD: 'Robinhood', SOFI: 'SoFi', ASTS: 'AST SpaceMobile', OKLO: 'Oklo', CEG: 'Constellation 能源',
-  VST: 'Vistra', UMC: '聯電 ADR', ASX: '日月光 ADR', CHT: '中華電 ADR', CRDO: 'Credo', ALAB: 'Astera Labs', CIEN: 'Ciena', GLW: '康寧', APH: '安費諾',
-  QQQ: '那斯達克 100 ETF', SPY: '標普 500 ETF', VOO: 'Vanguard 標普 500', SOXX: '費半 ETF', SMH: '半導體 ETF', DIA: '道瓊 ETF', IWM: '羅素 2000 ETF',
-  TQQQ: '三倍做多那指', SOXL: '三倍做多半導體', GLD: '黃金 ETF', TLT: '20 年期美債 ETF',
-}).map(([k, v]) => ['US.' + k, v]).concat([['Y.CL=F', 'WTI 原油期貨'], ['Y.BZ=F', '布蘭特原油'], ['Y.GC=F', '黃金期貨'], ['Y.SI=F', '白銀期貨'],
-  ['Y.NG=F', '天然氣期貨'], ['Y.ES=F', '標普期'], ['Y.NQ=F', '那指期'], ['Y.YM=F', '道瓊期'], ['Y.BTC-USD', '比特幣'], ['Y.ETH-USD', '以太幣'], ['Y.SOL-USD', 'Solana']]));
+// 常見美股、期貨、加密貨幣的中文名稱（台灣慣用譯名）放在 names-zh.json，前後端共用；中文介面優先顯示
+let ZH_NAME = {};
+fetch('names-zh.json').then((r) => r.json()).then((m) => { ZH_NAME = m; renderWatch(); renderSide(); }).catch(() => {});
 const nameOf = (c) => {
   if (c === 't00') return '加權指數';
   const q = state.quotes[c];
