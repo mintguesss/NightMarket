@@ -50,17 +50,19 @@ def test_server():
     port = free_port()
     env = dict(os.environ, TWSTOCK_DATA=tempfile.mkdtemp())
     p = subprocess.Popen([sys.executable, os.path.join(ROOT, "server.py"), "--port", str(port)],
-                         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     try:
         base = f"http://127.0.0.1:{port}"
-        for _ in range(40):
+        for _ in range(60):
+            if p.poll() is not None:
+                raise SystemExit("server exited:\n" + p.stderr.read().decode("utf-8", "replace"))
             try:
                 assert json.loads(get(base + "/api/ping"))["app"] == "nightmarket"
                 break
             except OSError:
-                time.sleep(0.25)
+                time.sleep(0.5)
         else:
-            raise SystemExit("伺服器沒有啟動")
+            raise SystemExit("server did not start")
         assert "NightMarket" in get(base + "/")
         assert json.loads(get(base + "/api/strategy/operands"))
         print("server ok on port", port)

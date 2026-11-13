@@ -24,6 +24,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
+# 英文版 Windows 等非 UTF-8 主控台印中文會直接當掉，統一改用 UTF-8 輸出
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import base64
 import hmac
 
