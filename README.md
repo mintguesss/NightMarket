@@ -26,7 +26,7 @@
 
 ## 安裝與啟動
 
-需要 Python 3.10 以上（Windows 建議從 [python.org](https://www.python.org/) 安裝，會附 `py` 指令）。
+需要 Python 3.10 以上（Windows 建議從 [python.org](https://www.python.org/) 安裝，會附 `py` 指令）。不需要安裝任何套件。
 
 **Windows 獨立視窗版**：雙擊 `start.bat`，會用 Edge 開一個沒有網址列的視窗，關掉視窗就結束。
 
@@ -36,7 +36,25 @@
 python server.py
 ```
 
-然後打開 <http://localhost:8765>。手機要看的話，手機和電腦需在同一個網路，並自行把 `server.py` 最後的 `127.0.0.1` 改成 `0.0.0.0`（注意：這樣同網路的人都連得到）。
+然後打開 <http://localhost:8765>。
+
+## 部署方式
+
+| 方式 | 需要電腦一直開著？ | 怎麼做 |
+|---|---|---|
+| 本機使用 | 是 | `start.bat` 或 `python server.py` |
+| 手機透過 Tailscale 連回家 | 是（或用樹莓派） | 電腦執行 `python server.py`，再執行 `tailscale serve --bg 8765`，手機開 `https://<電腦名稱>.<tailnet>.ts.net`。只有你的 Tailscale 裝置連得到，而且是 HTTPS，可以加入主畫面 |
+| 同一個 Wi-Fi 的手機 | 是 | `python server.py --host 0.0.0.0 --password 你的密碼`，手機開畫面上顯示的網址 |
+| **Android 手機單獨執行** | **否** | 安裝 Termux，`pkg install git python`、clone 這個 repo，執行 `bash deploy/run-android.sh`，用手機 Chrome 開 `http://localhost:8765` |
+| 樹莓派／NAS 常駐 | 否（小主機一直開） | 參考 `deploy/tw-us-viewer.service`（systemd 開機自動執行），搭配 Tailscale |
+| Docker | 依主機而定 | `docker build -t tw-us-viewer .`，`docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=密碼 -v tw-us-data:/data tw-us-viewer` |
+| Windows 執行檔 | 是 | `py -m pip install pyinstaller` 後執行 `build_exe.bat`，產生 `dist\TWUSStockViewer.exe` |
+
+**加入主畫面（PWA）**：用 `localhost` 或 HTTPS（例如 Tailscale serve）開啟時，手機瀏覽器選單的「加入主畫面」會變成一個 App 圖示，全螢幕開啟。iPhone 用 Safari 的「分享 → 加入主畫面」。
+
+**密碼**：`--password`（或環境變數 `TWSTOCK_PASSWORD`）設定後，除了本機直接連線，其他連線都要輸入密碼（帳號隨意）。
+
+**雲端主機**：實測從資料中心連線時，證交所、櫃買中心、Yahoo 都能正常取得資料，但 Nasdaq（美股財報與經濟日曆）會逾時。請只給自己使用、一定要設密碼，不要公開。
 
 ## 資料來源與即時性
 
@@ -82,6 +100,11 @@ web/
   draw.js         畫線工具
   panels.js       右側面板：資訊、籌碼分布、筆記
   mobile.js       手機版操作
+  manifest.webmanifest, sw.js, icons/   加入主畫面（PWA）
+deploy/           Android（Termux）啟動腳本、樹莓派 systemd 設定
+tools/gen_icons.py  產生圖示（純 Python）
+Dockerfile        容器版
+build_exe.bat     打包 Windows 執行檔
 ```
 
 圖表使用 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache 2.0，從 unpkg CDN 載入）。

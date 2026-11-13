@@ -9,6 +9,7 @@
 import json
 import os
 import re
+import socket
 import ssl
 import sys
 import threading
@@ -22,9 +23,17 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
+import base64
+import hmac
+
 PORT = int(os.environ.get("PORT", "8765"))
-ROOT = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.environ.get("TWSTOCK_DATA", ROOT)
+HOST = os.environ.get("HOST", "127.0.0.1")          # 0.0.0.0 = 讓同網路的手機連得到
+PASSWORD = os.environ.get("TWSTOCK_PASSWORD", "")   # 設定後非本機連線要輸入密碼
+FROZEN = getattr(sys, "frozen", False)
+ROOT = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_DATA = (os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "TWUSStockViewer")
+                if FROZEN else os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.environ.get("TWSTOCK_DATA", DEFAULT_DATA)
 PAPER_FILE = os.path.join(DATA_DIR, "paper.json")
 TW = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
@@ -1224,8 +1233,33 @@ def cal_week(start, mkt):
 
 # ---------------- HTTP ----------------
 class Handler(SimpleHTTPRequestHandler):
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".webmanifest": "application/manifest+json",
+                      ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml"}
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=os.path.join(ROOT, "web"), **kw)
+
+    def _authorized(self):
+        if not PASSWORD:
+            return True
+        ip = self.client_address[0]
+        # 本機直接連線免密碼；經由 tailscale serve 等反向代理進來的請求會帶 X-Forwarded-For，仍要密碼
+        if ip in ("127.0.0.1", "::1") and not self.headers.get("X-Forwarded-For"):
+            return True
+        h = self.headers.get("Authorization", "")
+        if h.startswith("Basic "):
+            try:
+                _, pw = base64.b64decode(h[6:]).decode("utf-8").split(":", 1)
+                return hmac.compare_digest(pw, PASSWORD)
+            except Exception:
+                return False
+        return False
+
+    def _deny(self):
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="tw-us-stock-viewer", charset="UTF-8"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, fmt, *args):
         pass
@@ -1245,7 +1279,18 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not self._authorized():
+            return self._deny()
         u = urllib.parse.urlparse(self.path)
+        if u.path in ("/sw.js",):  # service worker 不快取
+            self.send_response(200)
+            body = open(os.path.join(ROOT, "web", "sw.js"), "rb").read()
+            self.send_header("Content-Type", "text/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if not u.path.startswith("/api/"):
             return super().do_GET()
         q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
@@ -1292,6 +1337,8 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"error": str(e)}, 500)
 
     def do_POST(self):
+        if not self._authorized():
+            return self._deny()
         u = urllib.parse.urlparse(self.path)
         try:
             n = int(self.headers.get("Content-Length") or 0)
@@ -1311,15 +1358,38 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "msg": str(e)}, 500)
 
 
-def start(port=PORT):
+def start(port=PORT, host=None):
     os.makedirs(DATA_DIR, exist_ok=True)
     threading.Thread(target=stock_list, daemon=True).start()
     threading.Thread(target=paper_matcher, daemon=True).start()
-    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv = ThreadingHTTPServer((host or HOST, port), Handler)
     return srv
 
 
+def _lan_ips():
+    ips = set()
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.add(info[4][0])
+    except OSError:
+        pass
+    return sorted(ip for ip in ips if not ip.startswith("127."))
+
+
 if __name__ == "__main__":
-    srv = start()
-    print(f"看盤已啟動: http://localhost:{PORT}")
+    import argparse
+    import socket
+    ap = argparse.ArgumentParser(description="台美股看盤 後端")
+    ap.add_argument("--host", default=HOST, help="監聽位址，預設 127.0.0.1（只有本機）；0.0.0.0 讓同網路裝置連線")
+    ap.add_argument("--port", type=int, default=PORT)
+    ap.add_argument("--password", default=PASSWORD, help="非本機連線需要的密碼（建議 --host 0.0.0.0 時設定）")
+    args = ap.parse_args()
+    PASSWORD = args.password
+    srv = start(args.port, args.host)
+    print(f"看盤已啟動: http://localhost:{args.port}")
+    if args.host not in ("127.0.0.1", "localhost"):
+        for ip in _lan_ips():
+            print(f"  其他裝置可連: http://{ip}:{args.port}")
+        if not PASSWORD:
+            print("  ⚠ 沒有設定密碼，同網路的人都連得到。建議加上 --password 你的密碼")
     srv.serve_forever()
