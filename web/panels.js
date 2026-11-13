@@ -46,7 +46,7 @@
 
   /* ---------- 資訊 ---------- */
   async function getInfo(code) {
-    if (!infoCache[code]) infoCache[code] = api('/api/info?code=' + encodeURIComponent(code)).catch((e) => { delete infoCache[code]; throw e; });
+    if (!infoCache[code]) infoCache[code] = api('/api/info?code=' + encodeURIComponent(code) + TR).catch((e) => { delete infoCache[code]; throw e; });
     return infoCache[code];
   }
   async function renderInfo() {

@@ -89,6 +89,90 @@ def atr(h, l, c, n=14):
     return smma(tr, n)
 
 
+def dmi(h, l, c, n=14):
+    """回傳 (+DI, -DI, ADX)。"""
+    L = len(c)
+    pdm, mdm, tr = [None], [None], [None]
+    for i in range(1, L):
+        up, dn = h[i] - h[i - 1], l[i - 1] - l[i]
+        pdm.append(up if up > dn and up > 0 else 0.0)
+        mdm.append(dn if dn > up and dn > 0 else 0.0)
+        tr.append(max(h[i] - l[i], abs(h[i] - c[i - 1]), abs(l[i] - c[i - 1])))
+    sp, sm, st = smma(pdm, n), smma(mdm, n), smma(tr, n)
+    pdi = [None if a is None or not t else a / t * 100 for a, t in zip(sp, st)]
+    mdi = [None if a is None or not t else a / t * 100 for a, t in zip(sm, st)]
+    dx = [None if p is None or m is None or p + m == 0 else abs(p - m) / (p + m) * 100 for p, m in zip(pdi, mdi)]
+    return pdi, mdi, smma(dx, n)
+
+
+def cci(h, l, c, n=20):
+    tp = [(a + b + d) / 3 for a, b, d in zip(h, l, c)]
+    ma = sma(tp, n)
+    out = [None] * len(c)
+    for i in range(n - 1, len(c)):
+        md = sum(abs(x - ma[i]) for x in tp[i - n + 1:i + 1]) / n
+        out[i] = 0.0 if md == 0 else (tp[i] - ma[i]) / (0.015 * md)
+    return out
+
+
+def williams(h, l, c, n=14):
+    out = [None] * len(c)
+    for i in range(n - 1, len(c)):
+        hh, ll = max(h[i - n + 1:i + 1]), min(l[i - n + 1:i + 1])
+        out[i] = -50.0 if hh == ll else (hh - c[i]) / (hh - ll) * -100
+    return out
+
+
+def mfi(h, l, c, v, n=14):
+    tp = [(a + b + d) / 3 for a, b, d in zip(h, l, c)]
+    out = [None] * len(c)
+    for i in range(n, len(c)):
+        pos = sum(tp[j] * v[j] for j in range(i - n + 1, i + 1) if tp[j] > tp[j - 1])
+        neg = sum(tp[j] * v[j] for j in range(i - n + 1, i + 1) if tp[j] < tp[j - 1])
+        out[i] = 100.0 if neg == 0 else 100 - 100 / (1 + pos / neg)
+    return out
+
+
+def obv(c, v):
+    out, s = [0.0], 0.0
+    for i in range(1, len(c)):
+        s += v[i] if c[i] > c[i - 1] else -v[i] if c[i] < c[i - 1] else 0
+        out.append(s)
+    return out
+
+
+def sar(h, l, step=0.02, mx=0.2):
+    L = len(h)
+    if L < 2:
+        return [None] * L
+    out, up, af = [None], h[1] >= h[0], step
+    ep, s = (h[0], l[0]) if up else (l[0], h[0])
+    for i in range(1, L):
+        s = s + af * (ep - s)
+        if up:
+            s = min(s, l[i - 1], l[i - 2] if i > 1 else l[i - 1])
+            if l[i] < s:
+                up, s, ep, af = False, ep, l[i], step
+            elif h[i] > ep:
+                ep, af = h[i], min(af + step, mx)
+        else:
+            s = max(s, h[i - 1], h[i - 2] if i > 1 else h[i - 1])
+            if h[i] > s:
+                up, s, ep, af = True, ep, h[i], step
+            elif l[i] < ep:
+                ep, af = l[i], min(af + step, mx)
+        out.append(s)
+    return out
+
+
+def streak(c, rising=True):
+    out, k = [0], 0
+    for i in range(1, len(c)):
+        k = k + 1 if (c[i] > c[i - 1] if rising else c[i] < c[i - 1]) else 0
+        out.append(k)
+    return out
+
+
 # ---------------- 運算元目錄（前端也用這份產生選單） ----------------
 OPERANDS = [
     {"k": "close", "label": "收盤價", "en": "Close"},
@@ -113,6 +197,29 @@ OPERANDS = [
     {"k": "vol_ma", "label": "N 日均量", "en": "Volume SMA", "n": 20},
     {"k": "vol_ratio", "label": "量比（量 ÷ N 日均量）", "en": "Volume ratio", "n": 5},
     {"k": "atr", "label": "ATR", "en": "ATR", "n": 14},
+    {"k": "prev_close", "label": "前一日收盤價", "en": "Previous close"},
+    {"k": "chg_n", "label": "N 日漲跌幅(%)", "en": "N-day change %", "n": 5},
+    {"k": "gap_pct", "label": "跳空幅度(%)", "en": "Gap %"},
+    {"k": "range_pct", "label": "當日振幅(%)", "en": "Day range %"},
+    {"k": "bias", "label": "乖離率(%)", "en": "Bias %", "n": 20},
+    {"k": "ma_slope", "label": "均線斜率（較前一日 %）", "en": "SMA slope %", "n": 20},
+    {"k": "dist_hh", "label": "距 N 日高點(%)", "en": "% from N-day high", "n": 52},
+    {"k": "dist_ll", "label": "距 N 日低點(%)", "en": "% from N-day low", "n": 52},
+    {"k": "up_days", "label": "連續上漲天數", "en": "Up-day streak"},
+    {"k": "down_days", "label": "連續下跌天數", "en": "Down-day streak"},
+    {"k": "boll_pctb", "label": "布林 %B", "en": "Bollinger %B", "n": 20},
+    {"k": "boll_width", "label": "布林帶寬(%)", "en": "Bollinger width %", "n": 20},
+    {"k": "atr_pct", "label": "ATR 佔股價(%)", "en": "ATR % of price", "n": 14},
+    {"k": "wr", "label": "威廉 %R", "en": "Williams %R", "n": 14},
+    {"k": "cci", "label": "CCI", "en": "CCI", "n": 20},
+    {"k": "mfi", "label": "MFI 資金流量", "en": "MFI", "n": 14},
+    {"k": "adx", "label": "ADX 趨勢強度", "en": "ADX", "n": 14},
+    {"k": "pdi", "label": "+DI", "en": "+DI", "n": 14},
+    {"k": "mdi", "label": "-DI", "en": "-DI", "n": 14},
+    {"k": "roc", "label": "ROC 變動率(%)", "en": "ROC %", "n": 12},
+    {"k": "obv", "label": "OBV 能量潮", "en": "OBV"},
+    {"k": "obv_ma", "label": "OBV 均線", "en": "OBV SMA", "n": 20},
+    {"k": "sar", "label": "SAR 拋物線", "en": "Parabolic SAR"},
     {"k": "value", "label": "數值", "en": "Value", "v": 0},
 ]
 OPS = {"gt": ">", "lt": "<", "ge": "≥", "le": "≤", "cross_up": "向上穿越", "cross_down": "向下穿越"}
@@ -158,6 +265,29 @@ class Series:
             vm = sma(self.v, n or 5)
             r = [None] + [self.v[i] / vm[i - 1] if vm[i - 1] else None for i in range(1, L)]
         elif k == "atr": r = atr(self.h, self.l, c, n or 14)
+        elif k == "prev_close": r = [None] + c[:-1]
+        elif k == "chg_n": nn = n or 5; r = [(c[i] / c[i - nn] - 1) * 100 if i >= nn and c[i - nn] else None for i in range(L)]
+        elif k == "roc": nn = n or 12; r = [(c[i] / c[i - nn] - 1) * 100 if i >= nn and c[i - nn] else None for i in range(L)]
+        elif k == "gap_pct": r = [None] + [(self.o[i] / c[i - 1] - 1) * 100 if c[i - 1] else None for i in range(1, L)]
+        elif k == "range_pct": r = [None] + [(self.h[i] - self.l[i]) / c[i - 1] * 100 if c[i - 1] else None for i in range(1, L)]
+        elif k == "bias": m = sma(c, n or 20); r = [None if x is None or not x else (v / x - 1) * 100 for v, x in zip(c, m)]
+        elif k == "ma_slope": m = sma(c, n or 20); r = [None] + [None if m[i] is None or not m[i - 1] else (m[i] / m[i - 1] - 1) * 100 for i in range(1, L)]
+        elif k == "dist_hh": nn = n or 52; r = [(c[i] / max(self.h[max(0, i - nn + 1):i + 1]) - 1) * 100 if i >= nn - 1 else None for i in range(L)]
+        elif k == "dist_ll": nn = n or 52; r = [(c[i] / min(self.l[max(0, i - nn + 1):i + 1]) - 1) * 100 if i >= nn - 1 else None for i in range(L)]
+        elif k == "up_days": r = streak(c, True)
+        elif k == "down_days": r = streak(c, False)
+        elif k in ("boll_pctb", "boll_width"):
+            up, mid, dn = boll(c, n or 20)
+            if k == "boll_pctb": r = [None if u is None or u == d else (v - d) / (u - d) for v, u, d in zip(c, up, dn)]
+            else: r = [None if m is None or not m else (u - d) / m * 100 for u, m, d in zip(up, mid, dn)]
+        elif k == "atr_pct": a = atr(self.h, self.l, c, n or 14); r = [None if x is None or not v else x / v * 100 for x, v in zip(a, c)]
+        elif k == "wr": r = williams(self.h, self.l, c, n or 14)
+        elif k == "cci": r = cci(self.h, self.l, c, n or 20)
+        elif k == "mfi": r = mfi(self.h, self.l, c, self.v, n or 14)
+        elif k in ("pdi", "mdi", "adx"): r = dmi(self.h, self.l, c, n or 14)[("pdi", "mdi", "adx").index(k)]
+        elif k == "obv": r = obv(c, self.v)
+        elif k == "obv_ma": r = sma(obv(c, self.v), n or 20)
+        elif k == "sar": r = sar(self.h, self.l)
         else: raise ValueError(f"不支援的指標：{k}")
         self._cache[key] = r
         return r
@@ -208,6 +338,8 @@ def backtest_one(code, bars, strat, capital):
     buy_fee, sell_fee = fee_model(code, strat.get("mkt", "tw"))
     sl, tp = float(strat.get("stop_loss") or 0) / 100, float(strat.get("take_profit") or 0) / 100
     max_hold = int(strat.get("max_hold") or 0)
+    trail = float(strat.get("trailing_stop") or 0) / 100
+    peak = 0.0  # 進場後的最高價（移動停損用）
     size = float(strat.get("size_pct") or 100) / 100
     cash, shares, entry_px, entry_i, cost = capital, 0, 0.0, 0, 0.0
     trades, equity = [], []
@@ -220,6 +352,7 @@ def backtest_one(code, bars, strat, capital):
             if qty > 0:
                 amt = qty * b["o"]; f = buy_fee(amt)
                 cash -= amt + f; shares, entry_px, entry_i, cost = qty, b["o"], i, amt + f
+                peak = b["o"]
         elif pending == "sell" and shares:
             cash, shares = _close(trades, code, bars, entry_i, i, entry_px, b["o"], shares, cost, sell_fee, cash, "出場條件")
         pending = None
@@ -228,12 +361,16 @@ def backtest_one(code, bars, strat, capital):
             reason, px = None, None
             if sl and b["l"] <= entry_px * (1 - sl):
                 reason, px = "停損", min(b["o"], entry_px * (1 - sl))
+            elif trail and b["l"] <= peak * (1 - trail):
+                reason, px = "移動停損", min(b["o"], peak * (1 - trail))
             elif tp and b["h"] >= entry_px * (1 + tp):
                 reason, px = "停利", max(b["o"], entry_px * (1 + tp))
             elif max_hold and i - entry_i >= max_hold:
                 reason, px = "持有天數到期", b["c"]
             if reason:
                 cash, shares = _close(trades, code, bars, entry_i, i, entry_px, px, shares, cost, sell_fee, cash, reason)
+            else:
+                peak = max(peak, b["h"])
         # 3) 收盤判斷訊號
         if shares == 0 and s.group(strat.get("entry"), i):
             pending = "buy"

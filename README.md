@@ -31,7 +31,7 @@ python server.py        # then open http://localhost:8765
 |---|---|
 | **Charts** | 1D/5D intraday, 1m–4h, daily/weekly/monthly/quarterly/yearly · 6 overlays (MA, EMA, Bollinger, SAR, Envelope, Donchian) · 16 indicator panes (Volume, MACD, KD, RSI, BIAS, W%R, CCI, DMI, OBV, ATR, ROC, MTM, PSY, TRIX, DMA, VR) with adjustable parameters |
 | **Drawing tools** | Trend line, ray, extended line, horizontal/vertical lines, parallel channel, rectangle, Fibonacci, measure, text — draggable, magnet snap, saved per symbol |
-| **Strategies & backtesting** | Visual condition builder (crosses above/below, >, <, …) over price, volume and indicators · 6 templates · equity curve vs. buy & hold, CAGR, max drawdown, Sharpe, win rate, profit factor, trade log · fees and taxes included, next-open fills (no look-ahead) |
+| **Strategies & backtesting** | Visual condition builder (crosses above/below, >, <, …) over 38 price, volume and indicator inputs (MA, RSI, MACD, KD, Bollinger %B/width, ADX/DMI, CCI, Williams %R, MFI, OBV, SAR, bias, gaps, streaks, distance from N-day high…) · 16 templates · stop loss, take profit, trailing stop, max holding days · equity curve vs. buy & hold, CAGR, max drawdown, Sharpe, win rate, profit factor, trade log · fees and taxes included, next-open fills (no look-ahead) |
 | **Alerts & push** | Strategies are checked every minute during market hours (even with the page closed) · push to **Telegram**, **Discord** or **ntfy** · optional auto-trading in the paper account · simple price alerts too |
 | **Screener** | Fundamental filters (price, change, volume, market cap, P/E, yield, P/B, sector) + technical conditions · turn results into a strategy in one click |
 | **Heatmap** | Top 250 Taiwan / top 300 US stocks by market cap, grouped by sector |
@@ -107,6 +107,7 @@ The engine lives in [`strategy.py`](strategy.py) (standard library only) and can
 | Company data, revenue, dividends, institutional flows | TWSE / TPEx open data, Yahoo Finance | daily |
 | Earnings & economic calendar, US screener | Nasdaq | daily / live |
 | News | Yahoo, cnyes | — |
+| Chinese translation of English news (optional) | Google Translate web endpoint | — |
 
 All market data belongs to its providers. This app fetches data on your own machine for personal use; it does not store or redistribute it. **Please don't host it as a public service**, keep request rates modest (TWSE MIS temporarily blocks IPs that poll too fast), and respect each provider's terms. Tested from a data-center IP: TWSE, TPEx and Yahoo work; Nasdaq timed out.
 

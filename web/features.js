@@ -5,7 +5,7 @@ async function loadOperands() { if (!OPDEF) OPDEF = await api('/api/strategy/ope
 /* ---------- 條件編輯器（策略與選股共用） ---------- */
 function ruleEditor(el, group, onChange) {
   group.mode = group.mode || 'all'; group.rules = group.rules || [];
-  const opSel = (o) => `<select class="tsel" data-f="k">${OPDEF.operands.map((d) => `<option value="${d.k}" ${d.k === o.k ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</select>${
+  const opSel = (o) => `<select class="tsel" data-f="k">${OPDEF.operands.map((d) => `<option value="${d.k}" ${d.k === o.k ? 'selected' : ''}>${esc(LANG === 'en' ? d.en || d.label : d.label)}</option>`).join('')}</select>${
     OPDEF.operands.find((d) => d.k === o.k)?.n !== undefined ? `<input class="tin num-in" data-f="n" type="number" min="1" value="${o.n ?? OPDEF.operands.find((d) => d.k === o.k).n}" title="週期 N">` : ''}${
     o.k === 'value' ? `<input class="tin num-in w" data-f="v" type="number" step="any" value="${o.v ?? 0}" title="數值">` : ''}`;
   const render = () => {
@@ -39,11 +39,21 @@ const STRAT_TEMPLATES = [
   { name: '量增突破 20 日高', desc: '收盤創 20 日新高且量比 > 1.5 進場，跌破 MA10 出場', entry: { mode: 'all', rules: [R(C('close'), 'gt', C('hh', 20)), R(C('vol_ratio', 5), 'gt', V(1.5))] }, exit: { mode: 'any', rules: [R(C('close'), 'cross_down', C('ma', 10))] }, stop_loss: 7 },
   { name: 'MACD 黃金交叉', desc: 'DIF 上穿 DEA 進場，下穿出場', entry: { mode: 'all', rules: [R(C('macd_dif'), 'cross_up', C('macd_dea'))] }, exit: { mode: 'any', rules: [R(C('macd_dif'), 'cross_down', C('macd_dea'))] }, stop_loss: 8 },
   { name: 'KD 低檔黃金交叉', desc: 'K 上穿 D 且 K < 30 進場，K 下穿 D 出場', entry: { mode: 'all', rules: [R(C('kd_k', 9), 'cross_up', C('kd_d', 9)), R(C('kd_k', 9), 'lt', V(30))] }, exit: { mode: 'any', rules: [R(C('kd_k', 9), 'cross_down', C('kd_d', 9))] }, stop_loss: 8 },
+  { name: '海龜通道突破', desc: '收盤突破 55 日高點進場，跌破 20 日低點出場', entry: { mode: 'all', rules: [R(C('close'), 'gt', C('hh', 55))] }, exit: { mode: 'any', rules: [R(C('close'), 'lt', C('ll', 20))] }, stop_loss: 10 },
+  { name: '均線多頭排列', desc: 'MA5 > MA20 > MA60 且收盤站上 MA5 進場，跌破 MA20 出場', entry: { mode: 'all', rules: [R(C('ma', 5), 'gt', C('ma', 20)), R(C('ma', 20), 'gt', C('ma', 60)), R(C('close'), 'cross_up', C('ma', 5))] }, exit: { mode: 'any', rules: [R(C('close'), 'cross_down', C('ma', 20))] }, stop_loss: 8 },
+  { name: '趨勢跟隨＋移動停損', desc: 'ADX > 25 且 +DI 上穿 -DI 進場，從高點回落 8% 出場', entry: { mode: 'all', rules: [R(C('pdi', 14), 'cross_up', C('mdi', 14)), R(C('adx', 14), 'gt', V(25))] }, exit: { mode: 'any', rules: [] }, stop_loss: 0, trailing_stop: 8 },
+  { name: '負乖離過大反彈', desc: '收盤低於 MA20 超過 10% 進場，回到 MA20 出場', entry: { mode: 'all', rules: [R(C('bias', 20), 'lt', V(-10))] }, exit: { mode: 'any', rules: [R(C('bias', 20), 'gt', V(0))] }, stop_loss: 10, max_hold: 20 },
+  { name: '布林收斂後突破', desc: '布林帶寬 < 10% 且收盤突破上軌進場，跌破中軌出場', entry: { mode: 'all', rules: [R(C('boll_width', 20), 'lt', V(10)), R(C('close'), 'cross_up', C('boll_up', 20))] }, exit: { mode: 'any', rules: [R(C('close'), 'cross_down', C('boll_mid', 20))] }, stop_loss: 6 },
+  { name: '跳空上漲續強', desc: '跳空上漲 > 2% 且量比 > 2 進場，持有 10 天或跌破 MA10 出場', entry: { mode: 'all', rules: [R(C('gap_pct'), 'gt', V(2)), R(C('vol_ratio', 5), 'gt', V(2))] }, exit: { mode: 'any', rules: [R(C('close'), 'cross_down', C('ma', 10))] }, stop_loss: 6, max_hold: 10 },
+  { name: '連跌後反彈', desc: '連續下跌 5 天且 RSI < 30 進場，上漲 8% 或持有 10 天出場', entry: { mode: 'all', rules: [R(C('down_days'), 'ge', V(5)), R(C('rsi', 14), 'lt', V(30))] }, exit: { mode: 'any', rules: [] }, stop_loss: 8, take_profit: 8, max_hold: 10 },
+  { name: '接近 52 週新高', desc: '距 250 日高點不到 3% 且站上 MA50 進場，移動停損 10%', entry: { mode: 'all', rules: [R(C('dist_hh', 250), 'gt', V(-3)), R(C('close'), 'gt', C('ma', 50))] }, exit: { mode: 'any', rules: [] }, stop_loss: 0, trailing_stop: 10 },
+  { name: 'SAR 翻多', desc: '收盤由下往上穿越 SAR 進場，跌破 SAR 出場', entry: { mode: 'all', rules: [R(C('close'), 'cross_up', C('sar'))] }, exit: { mode: 'any', rules: [R(C('close'), 'cross_down', C('sar'))] }, stop_loss: 8 },
+  { name: 'MFI 超賣＋OBV 轉強', desc: 'MFI < 20 且 OBV 站上均線進場，MFI > 80 出場', entry: { mode: 'all', rules: [R(C('mfi', 14), 'lt', V(20)), R(C('obv'), 'gt', C('obv_ma', 20))] }, exit: { mode: 'any', rules: [R(C('mfi', 14), 'gt', V(80))] }, stop_loss: 8 },
 ];
 const stState = { list: [], cur: null, result: null, chart: null, years: 2, lastEvent: store.get('tw.lastEvent', 0) };
 function newStrategy(tpl = {}) {
   return JSON.parse(JSON.stringify({ name: (LANG === 'en' && tpl.name ? I18N_EN[tpl.name] : tpl.name) || (LANG === 'en' ? 'My strategy' : '我的策略'), mkt: state.mkt, universe: state.watch.slice(0, 5), entry: tpl.entry || { mode: 'all', rules: [] },
-    exit: tpl.exit || { mode: 'any', rules: [] }, stop_loss: tpl.stop_loss ?? 8, take_profit: tpl.take_profit ?? 0, max_hold: 0, size_pct: 100, enabled: false, alert: true, auto_trade: false }));
+    exit: tpl.exit || { mode: 'any', rules: [] }, stop_loss: tpl.stop_loss ?? 8, take_profit: tpl.take_profit ?? 0, trailing_stop: tpl.trailing_stop ?? 0, max_hold: tpl.max_hold ?? 0, size_pct: 100, enabled: false, alert: true, auto_trade: false }));
 }
 PAGES.strategy = {
   async load() {
@@ -88,6 +98,7 @@ PAGES.strategy = {
       <div class="st-card"><div class="st-card-h">風險控管與資金</div><div class="st-fields">
         <label>停損 %<input class="tin" data-k="stop_loss" type="number" step="any" value="${st.stop_loss ?? 0}"></label>
         <label>停利 %<input class="tin" data-k="take_profit" type="number" step="any" value="${st.take_profit ?? 0}"></label>
+        <label title="從進場後的最高價回落這麼多 % 就賣出，讓獲利奔跑">移動停損 %<input class="tin" data-k="trailing_stop" type="number" step="any" value="${st.trailing_stop ?? 0}"></label>
         <label>最長持有天數<input class="tin" data-k="max_hold" type="number" value="${st.max_hold ?? 0}"></label>
         <label>每次投入資金 %<input class="tin" data-k="size_pct" type="number" value="${st.size_pct ?? 100}"></label></div>
         <div class="muted small">0 代表不使用。回測時資金平均分給股票池每一檔。</div></div>

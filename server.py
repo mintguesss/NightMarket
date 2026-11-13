@@ -314,7 +314,7 @@ def yahoo_quote(code):
             "ext": ext, "session": sess, "tradable": sess in ("REGULAR", "PRE", "POST"), "tradePrice": trade_px,
             "preStart": pre.get("start"), "postEnd": post.get("end"),
         }
-    return cached("yq:" + sym, 4, load)
+    return cached("yq:" + sym, 1.5, load)
 
 
 def taifex_open(now=None):
@@ -397,6 +397,7 @@ def kline(code, interval, rng, ext=False):
             if None in (o, h, l, c):
                 continue
             bars.append({"t": t, "o": round(o, 4), "h": round(h, 4), "l": round(l, 4), "c": round(c, 4), "v": v or 0})
+        bars = sorted({b["t"]: b for b in bars}.values(), key=lambda b: b["t"])  # Yahoo 偶爾在時段交界回傳重複或亂序的時間
         ctp = meta.get("currentTradingPeriod") or {}
         tps = meta.get("tradingPeriods") or {}
         if (is_tw(code) or code == "t00") and interval.endswith("m"):
@@ -470,11 +471,39 @@ def sparks(codes):
         url = ("https://query1.finance.yahoo.com/v8/finance/spark?range=1d&interval=5m&symbols="
                + urllib.parse.quote(",".join(part), safe=",.^="))
         return cached("spark:" + ",".join(part), 60, lambda: fetch_json(url))
-    for d in POOL.map(lambda p: _safe(one, p, {}), [keys[i:i + 20] for i in range(0, len(keys), 20)]):
+    tw = [s for s in keys if is_tw(syms[s])]
+    us = [s for s in keys if not is_tw(syms[s])]
+    for d in POOL.map(lambda p: _safe(one, p, {}), [us[i:i + 20] for i in range(0, len(us), 20)]):
         for s, v in d.items():
-            closes = [x for x in (v.get("close") or []) if x is not None]
-            out[syms.get(s, s)] = {"c": closes, "prev": v.get("chartPreviousClose")}
+            pts = [(t, c) for t, c in zip(v.get("timestamp") or [], v.get("close") or []) if c is not None]
+            out[syms.get(s, s)] = {"t": [p[0] for p in pts], "c": [p[1] for p in pts], "prev": v.get("chartPreviousClose"),
+                                   "start": v.get("start"), "end": v.get("end")}
+    # 台股改用奇摩即時 1 分鐘走勢（國際版 5 分 K 延遲又常缺資料），一次可查多檔，取每 3 分鐘一點
+    for part in POOL.map(lambda p: _safe(tw_spark_batch, p, {}), [tw[i:i + 20] for i in range(0, len(tw), 20)]):
+        for s, v in part.items():
+            out[syms.get(s, s)] = v
     return out
+
+
+def tw_spark_batch(syms):
+    url = ("https://tw.stock.yahoo.com/_td-stock/api/resource/FinanceChartService.ApacLibraCharts;symbols="
+           + urllib.parse.quote(json.dumps(syms), safe="") + ";type=tick")
+
+    def load():
+        res = {}
+        for item in fetch_json(url):
+            c = item.get("chart") or {}
+            m = c.get("meta") or {}
+            ts, cl = c.get("timestamp") or [], ((c.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+            pts = [(t, v) for t, v in zip(ts, cl) if v is not None]
+            if not pts:
+                continue
+            day0 = pts[0][0] - (pts[0][0] + 8 * 3600) % 86400  # 當天 00:00（台北）
+            pts = pts[::3] + ([pts[-1]] if (len(pts) - 1) % 3 else [])
+            res[m.get("symbol")] = {"t": [p[0] for p in pts], "c": [p[1] for p in pts], "prev": m.get("chartPreviousClose") or m.get("previousClose"),
+                                    "start": day0 + 9 * 3600, "end": day0 + 13 * 3600 + 1800}
+        return res
+    return cached("twspark:" + ",".join(syms), 60, load)
 
 
 # ---------------- 搜尋 (美股) ----------------
@@ -1132,10 +1161,70 @@ def us_info(code):
     return out
 
 
-def stock_info(code):
-    info = tw_info(code) if is_tw(code) else us_info(code)
+def stock_info(code, tr=False):
+    info = dict(tw_info(code) if is_tw(code) else us_info(code))
     info["news"] = _safe(news, code, [])
+    if tr and not is_tw(code):
+        info["news"] = add_translation(info["news"])
+        if info.get("summary"):
+            info["summary_zh"] = (translate_zh([info["summary"]]) or [None])[0]
+        # 產業別、經營團隊職稱也翻成中文（後面括號保留英文原文）
+        prof = [list(r) for r in info.get("profile") or []]
+        offs = [list(r) for r in info.get("officers") or []]
+        targets = [r for r in prof if r[0] == "產業" and r[1]] + [r for r in offs if r[1]]
+        for r, zh in zip(targets, translate_zh([r[1] for r in targets])):
+            if zh and zh != r[1]:
+                r[1] = f"{zh}（{r[1]}）"
+        info["profile"], info["officers"] = prof, offs
     return info
+
+
+# ---------------- 英文翻譯（新聞標題、公司簡介） ----------------
+# 使用 Google 翻譯的公開網頁端點；失敗時前端照樣顯示原文，並附「翻譯」連結
+_TR, _tr_lock, _tr_fail = {}, threading.Lock(), [0.0]
+_CJK = re.compile(r"[぀-ヿ㐀-鿿]")
+
+
+def translate_zh(texts):
+    texts = [t if isinstance(t, str) else "" for t in texts]
+    need = [t for t in dict.fromkeys(texts) if t.strip() and t not in _TR and not _CJK.search(t) and re.search(r"[A-Za-z]{2}", t)]
+    if need and time.time() - _tr_fail[0] > 300:  # 失敗後 5 分鐘內不再嘗試
+        chunks, cur, size = [], [], 0
+        for t in need:
+            if cur and (size + len(t) > 4000 or len(cur) >= 40):
+                chunks.append(cur); cur, size = [], 0
+            cur.append(t[:4500]); size += len(t)
+        if cur:
+            chunks.append(cur)
+        for ch in chunks:
+            try:
+                body = urllib.parse.urlencode([("q", t) for t in ch]).encode()
+                req = urllib.request.Request("https://translate.googleapis.com/translate_a/t?client=gtx&sl=en&tl=zh-TW", data=body,
+                                             headers={"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded;charset=utf-8"})
+                with urllib.request.urlopen(req, timeout=10, context=SSL_CTX) as r:
+                    res = json.loads(r.read().decode("utf-8"))
+                if isinstance(res, str):
+                    res = [res]
+                with _tr_lock:
+                    if len(_TR) > 5000:
+                        _TR.clear()
+                    for src, dst in zip(ch, res):
+                        dst = dst[0] if isinstance(dst, list) else dst
+                        if isinstance(dst, str) and dst.strip():
+                            _TR[src] = dst
+            except Exception as e:
+                _tr_fail[0] = time.time()
+                print("translate error:", e, file=sys.stderr)
+                break
+    return [_TR.get(t) for t in texts]
+
+
+def add_translation(items, key="title"):
+    items = [dict(n) for n in items]
+    for n, zh in zip(items, translate_zh([n.get(key) for n in items])):
+        if zh:
+            n[key + "_zh"] = zh
+    return items
 
 
 
@@ -1732,9 +1821,10 @@ class Handler(SimpleHTTPRequestHandler):
             elif u.path == "/api/calweek":
                 self.send_json(cal_week(q["start"], q.get("mkt", "tw")))
             elif u.path == "/api/info":
-                self.send_json(stock_info(q["code"]))
+                self.send_json(stock_info(q["code"], q.get("tr") == "1"))
             elif u.path == "/api/news":
-                self.send_json(news(q.get("code")))
+                n = news(q.get("code"))
+                self.send_json(add_translation(n) if q.get("tr") == "1" and q.get("code") and not is_tw(q["code"]) else n)
             elif u.path == "/api/calendar":
                 self.send_json(calendar(q.get("date") or datetime.now(TW).strftime("%Y-%m-%d")))
             elif u.path == "/api/paper":

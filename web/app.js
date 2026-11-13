@@ -199,8 +199,24 @@ const lineData = (bars, vals) => bars.map((b, i) => (vals[i] == null || isNaN(va
 function addLine(chart, list, l, bars) {
   const s = chart.addLineSeries({ color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
     lineStyle: l.dash ? 2 : 0, ...(l.dots ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 1.5 } : {}) });
-  s.setData(lineData(bars, l.vals)); list.push(s); return s;
+  list.push(s); s.setData(lineData(bars, l.vals)); return s; // 先登記再塞資料：塞資料出錯時，下次重畫仍會把它清掉
 }
+// K 線資料健檢：去掉壞值、依時間排序、同一時間只留最後一筆，最後一根對齊週期（Yahoo 最後一根常帶著秒數）
+function sanitizeBars(bars, step) {
+  const ok = (x) => typeof x === 'number' && isFinite(x);
+  const m = new Map();
+  for (const b of bars || []) {
+    if (!b || !ok(b.t) || !ok(b.o) || !ok(b.h) || !ok(b.l) || !ok(b.c) || b.c <= 0) continue;
+    m.set(b.t, { t: b.t, o: b.o, c: b.c, h: Math.max(b.h, b.o, b.c), l: Math.min(b.l, b.o, b.c), v: ok(b.v) && b.v > 0 ? b.v : 0 });
+  }
+  const out = [...m.values()].sort((a, b) => a.t - b.t);
+  if (step && out.length > 1) {
+    const last = out[out.length - 1], prev = out[out.length - 2], gap = last.t - prev.t;
+    if (gap % step) { const t = prev.t + Math.floor(gap / step) * step; if (t > prev.t) last.t = t; else { prev.h = Math.max(prev.h, last.h); prev.l = Math.min(prev.l, last.l); prev.c = last.c; prev.v += last.v; out.pop(); } }
+  }
+  return out;
+}
+const STEP_OF = { '1m': 60, '2m': 120, '5m': 300, '15m': 900, '30m': 1800, '60m': 3600, '90m': 5400 };
 
 function renderMain() {
   clearSeries(mainChart, mainSeries); overlayInfo = [];
@@ -211,6 +227,7 @@ function renderMain() {
   if (P.line) {
     const last = closes[closes.length - 1], base = state.prev ?? closes[0], col = last >= base ? UP : DOWN;
     primary = mainChart.addAreaSeries({ lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
+    mainSeries.push(primary);
     const data = bars.map((b) => (inRegular(b.t) ? { time: toTime(b.t), value: b.c } : { time: toTime(b.t), value: b.c, lineColor: '#8a90a0', topColor: '#8a90a022', bottomColor: '#8a90a003' }));
     if (state.period === 'tick') {
       const end = state.sessionEnd && state.sessionEnd > bars[0].t && state.sessionEnd - bars[0].t < 86400 ? state.sessionEnd
@@ -218,7 +235,7 @@ function renderMain() {
       for (let t = bars[bars.length - 1].t + 60; t <= end; t += 60) data.push({ time: toTime(t) });
     }
     state.fillTimes = state.period === 'tick' ? data.map((x) => x.time) : null;
-    primary.setData(data); mainSeries.push(primary);
+    primary.setData(data);
     if (base) primary.createPriceLine({ price: base, color: '#7d8494', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '昨收' });
     let pv = 0, vv = 0;
     const avg = bars.map((b, i) => {
@@ -228,12 +245,12 @@ function renderMain() {
     const l = { name: '均價', color: '#f5a524', vals: avg }; addLine(mainChart, mainSeries, l, bars); overlayInfo.push(l);
   } else {
     primary = mainChart.addCandlestickSeries({ upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, priceFormat: pf });
+    mainSeries.push(primary);
     primary.setData(bars.map((b) => {
       const o = { time: toTime(b.t), open: b.o, high: b.h, low: b.l, close: b.c };
       if (!inRegular(b.t)) { const c = (b.c >= b.o ? UP : DOWN) + '66'; Object.assign(o, { color: c, borderColor: c, wickColor: c }); } // 盤前盤後K棒半透明
       return o;
     }));
-    mainSeries.push(primary);
     state.overlays.forEach((k) => {
       const def = IND.MAIN[k]; if (!def) return;
       def.calc(bars, IND.get('main', k)).lines.forEach((l) => { addLine(mainChart, mainSeries, l, bars); overlayInfo.push(l); });
@@ -258,11 +275,12 @@ function renderSub(i) {
   const chart = subCharts[i]; clearSeries(chart, subSeries[i]); subInfo[i] = []; subPrimary[i] = null;
   const key = state.subs[i], bars = state.bars; if (!key || !bars.length) { $('#legendSub' + (i + 1)).innerHTML = ''; return; }
   const r = IND.SUB[key].calc(bars, IND.get('sub', key), { volDiv: isTW(state.code) ? 1000 : 1 });
-  if (state.fillTimes && PERIODS[state.period].line) { const ws = chart.addLineSeries({ visible: false, priceLineVisible: false, lastValueVisible: false }); ws.setData(state.fillTimes.map((t) => ({ time: t }))); subSeries[i].push(ws); } // 副圖也補空白時段到收盤
+  if (state.fillTimes && PERIODS[state.period].line) { const ws = chart.addLineSeries({ visible: false, priceLineVisible: false, lastValueVisible: false }); subSeries[i].push(ws); ws.setData(state.fillTimes.map((t) => ({ time: t }))); } // 副圖也補空白時段到收盤
   if (r.hist) {
     const s = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceFormat: r.volume ? { type: 'volume' } : { type: 'price', precision: 2, minMove: 0.01 } });
+    subSeries[i].push(s);
     s.setData(bars.map((b, j) => (r.hist[j].v == null || isNaN(r.hist[j].v) ? { time: toTime(b.t) } : { time: toTime(b.t), value: r.hist[j].v, color: (r.hist[j].up ? UP : DOWN) + 'cc' })));
-    subSeries[i].push(s); subPrimary[i] = s; subInfo[i].push({ name: r.label || key, color: '#c9ccd3', vals: r.hist.map((h) => h.v), vol: r.volume });
+    subPrimary[i] = s; subInfo[i].push({ name: r.label || key, color: '#c9ccd3', vals: r.hist.map((h) => h.v), vol: r.volume });
   }
   r.lines.forEach((l) => { const s = addLine(chart, subSeries[i], l, bars); if (!subPrimary[i]) subPrimary[i] = s; subInfo[i].push({ ...l, vol: r.volume }); });
   if (r.volume && !r.hist) subSeries[i].forEach((s) => s.applyOptions({ priceFormat: { type: 'volume' } }));
@@ -305,11 +323,37 @@ allCharts.forEach((c) => c.subscribeCrosshairMove((p) => {
   const i = idxByTime.get(p.time); if (i != null) crossTo(i, p.time, c);
 }));
 
+let renderFails = 0;
 function rerender(keep) {
   const range = keep ? mainChart.timeScale().getVisibleLogicalRange() : null;
-  reindex(); renderMain(); renderSubs();
-  if (state.period === 'tick') mainChart.timeScale().fitContent(); // 分時固定顯示整個交易日
-  else if (range) mainChart.timeScale().setVisibleLogicalRange(range);
+  try {
+    // 正式版圖表函式庫不檢查資料：時間亂序或有壞值時不會報錯，而是整張圖畫不出來，所以每次重畫前先檢查
+    const b = state.bars;
+    for (let i = 0; i < b.length; i++) {
+      if (!(b[i].c > 0) || !isFinite(b[i].o) || !isFinite(b[i].h) || !isFinite(b[i].l) || (i && b[i].t <= b[i - 1].t)) { state.bars = sanitizeBars(b); break; }
+    }
+    reindex(); renderMain(); renderSubs();
+    if (state.period === 'tick') mainChart.timeScale().fitContent(); // 分時固定顯示整個交易日
+    else if (range) mainChart.timeScale().setVisibleLogicalRange(range);
+    renderFails = 0;
+  } catch (e) {
+    console.error('render', e);
+    // 畫圖失敗：清掉所有圖層，避免殘留舊的線；再失敗就顯示錯誤與重新載入按鈕
+    clearAllSeries();
+    if (++renderFails === 1) { state.bars = sanitizeBars(state.bars); return rerender(false); }
+    $('#legendMain').innerHTML = `<span class="lbl">圖表繪製失敗：${esc(e.message)}</span> <button class="btn-ghost" id="chartReload">重新載入圖表</button>`;
+    $('#chartReload').onclick = () => resetChart();
+  }
+}
+function clearAllSeries() {
+  [[mainChart, mainSeries], [subCharts[0], subSeries[0]], [subCharts[1], subSeries[1]]].forEach(([c, l]) => { l.forEach((s) => { try { c.removeSeries(s); } catch {} }); l.length = 0; });
+  primary = null; subPrimary[0] = subPrimary[1] = null;
+}
+// 完整重置：清圖層、恢復價格軸自動縮放、重新抓資料（右鍵選單和錯誤訊息都會用到）
+function resetChart() {
+  renderFails = 0; clearAllSeries(); state.bars = [];
+  allCharts.forEach((c) => { c.priceScale('right').applyOptions({ autoScale: true }); c.timeScale().resetTimeScale(); });
+  loadKline();
 }
 function aggregate(bars, agg, off) {
   const out = []; let cur = null, key = null, dayFirst = null, day = null;
@@ -343,7 +387,8 @@ async function loadKline(keepRange = false) {
       if (qDay > lastDay) bars = [...bars, { t: qt, o: q.open, h: q.high, l: q.low, c: q.price, v: (q.volume || 0) * 1000 }];
       else if (qDay === lastDay) Object.assign(last, { h: Math.max(last.h, q.high ?? last.h), l: Math.min(last.l, q.low ?? last.l), c: q.price });
     }
-    state.bars = bars; state.lastVol = q?.volume ?? null;
+    state.bars = sanitizeBars(bars, P.agg || STEP_OF[P.interval]); state.lastVol = q?.volume ?? null; bars = state.bars;
+    if (!keepRange) allCharts.forEach((c) => c.priceScale('right').applyOptions({ autoScale: true })); // 換股或換週期時恢復自動縮放，避免價格軸被拖動後K棒跑出畫面
     state.prev = P.line ? (state.period === 'tick' ? q?.prev ?? d.prev : d.prev) : null;
     rerender(keepRange);
     if (!keepRange) {
@@ -363,7 +408,7 @@ function liveUpdate() {
   const last = state.bars[state.bars.length - 1], volMul = isTW(state.code) ? 1000 : 1;
   const dv = state.lastVol != null && q.volume != null ? Math.max(0, (q.volume - state.lastVol) * volMul) : 0;
   state.lastVol = q.volume;
-  if (q.ts < last.t) return;
+  if (!(q.price > 0) || q.ts < last.t) return;
   if (q.ts < last.t + step) { last.c = q.price; last.h = Math.max(last.h, q.price); last.l = Math.min(last.l, q.price); last.v += dv; }
   else state.bars.push({ t: last.t + Math.floor((q.ts - last.t) / step) * step, o: q.price, h: q.price, l: q.price, c: q.price, v: dv });
   rerender(true);
@@ -424,15 +469,22 @@ $('#drawBar').addEventListener('click', (e) => {
 });
 
 /* ---------- 自選清單 ---------- */
-function drawSpark(cv, sp, W = 58, H = 26) {
+function drawSpark(cv, sp, W = 58, H = 26, code = null) {
   const ctx = cv.getContext('2d'), dpr = devicePixelRatio || 1;
   cv.width = W * dpr; cv.height = H * dpr; ctx.scale(dpr, dpr); ctx.clearRect(0, 0, W, H);
-  const c = sp?.c; if (!c || c.length < 2) return;
+  if (!sp?.c || sp.c.length < 2) return;
+  let c = sp.c, ts = sp.t && sp.t.length === c.length ? sp.t : null;
+  // 用即時報價補上最新一點，走勢尾巴才不會停在兩分鐘前
+  const q = code && state.quotes[code];
+  if (ts && q?.price > 0 && q.ts > ts[ts.length - 1] && q.ts <= (sp.end || Infinity) + 60 && q.isOpen !== false) { c = [...c, q.price]; ts = [...ts, q.ts]; }
   const base = sp.prev ?? c[0], lo = Math.min(base, ...c), hi = Math.max(base, ...c), rg = hi - lo || 1;
-  const y = (v) => H - 2 - ((v - lo) / rg) * (H - 4), x = (i) => (i / (c.length - 1)) * W, col = c[c.length - 1] >= base ? UP : DOWN;
+  // 有時間軸時依「交易時段進度」放 x，開盤沒多久的線只會畫在左邊，不會被拉滿整格
+  const span = ts && sp.start && sp.end > sp.start ? sp.end - sp.start : 0;
+  const x = span ? (i) => Math.max(0, Math.min(1, (ts[i] - sp.start) / span)) * W : (i) => (i / (c.length - 1)) * W;
+  const y = (v) => H - 2 - ((v - lo) / rg) * (H - 4), col = c[c.length - 1] >= base ? UP : DOWN;
   ctx.setLineDash([2, 2]); ctx.strokeStyle = '#3a4050'; ctx.beginPath(); ctx.moveTo(0, y(base)); ctx.lineTo(W, y(base)); ctx.stroke(); ctx.setLineDash([]);
   ctx.beginPath(); c.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)))); ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.stroke();
-  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath();
+  ctx.lineTo(x(c.length - 1), H); ctx.lineTo(x(0), H); ctx.closePath();
   const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, col + '55'); g.addColorStop(1, col + '00'); ctx.fillStyle = g; ctx.fill();
 }
 function groupCodes(f) {
@@ -476,9 +528,16 @@ function renderWatch() {
       <span class="num wc ${k}">${pctTxt}${x ? `<small class="${xk}">${sign(xd)}${((xd / q.price) * 100).toFixed(2)}%<em>${esc(x.label)}</em></small>` : ''}</span>
       <span class="num ${k}">${q ? sign(d) + fmtP(d) : '--'}</span></div>`;
   }).join('');
-  if (S.spark) el.querySelectorAll('.wrow').forEach((r) => drawSpark(r.querySelector('canvas'), state.sparks[r.dataset.code]));
+  if (S.spark) el.querySelectorAll('.wrow').forEach((r) => drawSpark(r.querySelector("canvas"), state.sparks[r.dataset.code], 58, 26, r.dataset.code));
 }
 $('#watchList').addEventListener('click', (e) => { const r = e.target.closest('.wrow'); if (r) selectCode(r.dataset.code); });
+['#paneMain', '#paneSub1', '#paneSub2'].forEach((s) => $(s).addEventListener('contextmenu', (e) => {
+  if (draw.tool !== 'cursor') return; e.preventDefault();
+  openMenu(e.clientX, e.clientY, [
+    { label: '回到最新 K 棒', act: () => { const n = state.bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); allCharts.forEach((c) => c.priceScale('right').applyOptions({ autoScale: true })); } },
+    { label: '重設圖表（重新載入）', act: () => resetChart() },
+  ]);
+}));
 $('#watchList').addEventListener('contextmenu', (e) => { const r = e.target.closest('.wrow'); if (!r) return; e.preventDefault(); stockMenu(r.dataset.code, e.clientX, e.clientY, true); });
 $('#watchCols').addEventListener('click', (e) => {
   const s = e.target.closest('[data-sort]'); if (!s) return; const S = state.settings;
@@ -704,15 +763,25 @@ async function loadSideNews() {
   if (code === 't00') { el.innerHTML = '<div class="empty">請到「觀察」看市場快訊</div>'; return; }
   el.innerHTML = '<div class="empty">載入新聞…</div>';
   try {
-    const list = await api('/api/news?code=' + encodeURIComponent(code)); if (seq !== sideNewsSeq) return;
+    const list = await api('/api/news?code=' + encodeURIComponent(code) + TR); if (seq !== sideNewsSeq) return;
     el.innerHTML = '<button class="btn-ghost" style="width:100%;margin-bottom:8px" data-goinfo>完整資訊頁（公司資料、營收、EPS、股利）›</button>' + (list.length ? list.map(newsItem).join('') : '<div class="empty">沒有相關新聞</div>');
   } catch (e) { el.innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; }
 }
 function newsItem(n) {
   const ago = n.time ? (Date.now() / 1000 - n.time) : null;
   const t = ago == null ? '' : ago < 3600 ? `${Math.max(1, Math.round(ago / 60))} 分鐘前` : ago < 86400 ? `${Math.round(ago / 3600)} 小時前` : ago < 172800 ? '昨天 ' + new Date(n.time * 1000).toTimeString().slice(0, 5) : new Date(n.time * 1000).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
-  return `<a class="news-item" href="${esc(n.link)}" target="_blank" rel="noopener"><div class="t">${esc(n.title)}</div>${n.summary ? `<div class="sm">${esc(n.summary)}</div>` : ''}<div class="m">${esc(n.publisher || '')}${n.cat ? '・' + esc(n.cat) : ''}　${t}</div></a>`;
+  // 英文新聞：中文介面時標題用翻譯、原文縮小放下面；翻譯失敗就附「翻譯」連結
+  const en = LANG !== 'en' && n.title && !/[㐀-鿿]/.test(n.title);
+  const title = en && n.title_zh ? `<div class="t">${esc(n.title_zh)}</div><div class="orig">${esc(n.title)}</div>` : `<div class="t">${esc(n.title)}</div>`;
+  const trLink = en && !n.title_zh ? `<span class="tr-link" data-tr="${esc(n.title)}">翻譯</span>` : '';
+  return `<a class="news-item" href="${esc(n.link)}" target="_blank" rel="noopener">${title}${n.summary ? `<div class="sm">${esc(n.summary)}</div>` : ''}<div class="m">${esc(n.publisher || '')}${n.cat ? '・' + esc(n.cat) : ''}　${t}${trLink}</div></a>`;
 }
+const TR = LANG !== 'en' ? '&tr=1' : '';
+document.addEventListener('click', (e) => { // 「翻譯」連結：開 Google 翻譯，不開新聞本身
+  const el = e.target.closest('[data-tr]'); if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  window.open('https://translate.google.com/?sl=en&tl=zh-TW&op=translate&text=' + encodeURIComponent(el.dataset.tr), '_blank', 'noopener');
+}, true);
 function switchSideTab(t) {
   state.sideTab = t;
   $$('#sideTabs button').forEach((x) => x.classList.toggle('active', x.dataset.t === t));
@@ -1006,10 +1075,32 @@ function appInit() {
   if (hp.get('view')) setTimeout(() => setView(hp.get('view')), 300);
   let sec = 0;
   setInterval(() => {
-    sec += 5; const open = (state.mkt === 'tw' ? twOpen() : usActive()), every = state.settings.refresh || 5;
+    sec += 1; const open = (state.mkt === 'tw' ? twOpen() : usActive()), every = state.settings.refresh || 5;
     if ((open && sec % every === 0) || sec % 60 === 0) refreshQuotes();
+    // 美股：正在看的這一檔另外每 2 秒更新（台股證交所 MIS 本身約 5 秒更新一次，不用更快）
+    else if (open && state.mkt === 'us' && sec % 2 === 0) refreshCurrent();
+    if (sec % 5) return;
     if (open && sec % 60 === 0 && state.view === 'chart' && INTRADAY_LIVE.has(state.period)) loadKline(true);
     if (sec % (open ? 120 : 600) === 0) refreshSparks();
     if (sec % 30 === 0) loadPaper();
-  }, 5000);
+  }, 1000);
 }
+let curBusy = false;
+async function refreshCurrent() {
+  if (curBusy || quoteBusy || document.hidden) return; curBusy = true;
+  try {
+    const code = state.code, q = await api('/api/quote?codes=' + encodeURIComponent(code));
+    if (code === state.code && q[code]) {
+      Object.assign(state.quotes, q); renderSide();
+      const row = document.querySelector(`#watchList .wrow[data-code="${CSS.escape(code)}"]`); if (row) renderWatch();
+      if (state.view === 'chart') liveUpdate();
+    }
+  } catch {}
+  curBusy = false;
+}
+// 我們自己的程式出錯時提示一下，方便回報（別的擴充功能的錯誤不管）
+let lastErrToast = 0;
+window.addEventListener('error', (e) => {
+  if (!e.filename || !e.filename.startsWith(location.origin) || Date.now() - lastErrToast < 15000) return;
+  lastErrToast = Date.now(); toast(`畫面發生錯誤：${e.message}（圖表異常可按右鍵 →「重設圖表」）`);
+});
