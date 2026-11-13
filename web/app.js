@@ -483,12 +483,21 @@ function drawSpark(cv, sp, W = 58, H = 26, code = null) {
   // 用即時報價補上最新一點，走勢尾巴才不會停在兩分鐘前
   const q = code && state.quotes[code];
   if (ts && q?.price > 0 && q.ts > ts[ts.length - 1] && q.ts <= (sp.end || Infinity) + 60 && q.isOpen !== false) { c = [...c, q.price]; ts = [...ts, q.ts]; }
-  const base = sp.prev ?? c[0], lo = Math.min(base, ...c), hi = Math.max(base, ...c), rg = hi - lo || 1;
+  // 動態縱軸：依這檔自己的高低點縮放（不硬塞昨收），走勢平的也看得出起伏；
+  // 但最小範圍取股價的 0.6%，避免幾檔跳動被放大成大起大落。昨收在範圍附近才一起納入。
+  const base = sp.prev ?? c[0], dlo = Math.min(...c), dhi = Math.max(...c), mid = (dlo + dhi) / 2;
+  const minRg = Math.abs(mid) * 0.006 || 1;
+  let lo = dlo, hi = dhi;
+  if (hi - lo < minRg) { lo = mid - minRg / 2; hi = mid + minRg / 2; }
+  const near = (hi - lo) * 0.5;
+  if (base >= lo - near && base <= hi + near) { lo = Math.min(lo, base); hi = Math.max(hi, base); }
+  const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+  const rg = hi - lo || 1;
   // 有時間軸時依「交易時段進度」放 x，開盤沒多久的線只會畫在左邊，不會被拉滿整格
   const span = ts && sp.start && sp.end > sp.start ? sp.end - sp.start : 0;
   const x = span ? (i) => Math.max(0, Math.min(1, (ts[i] - sp.start) / span)) * W : (i) => (i / (c.length - 1)) * W;
   const y = (v) => H - 2 - ((v - lo) / rg) * (H - 4), col = c[c.length - 1] >= base ? UP : DOWN;
-  ctx.setLineDash([2, 2]); ctx.strokeStyle = '#3a4050'; ctx.beginPath(); ctx.moveTo(0, y(base)); ctx.lineTo(W, y(base)); ctx.stroke(); ctx.setLineDash([]);
+  if (base >= lo && base <= hi) { ctx.setLineDash([2, 2]); ctx.strokeStyle = '#3a4050'; ctx.beginPath(); ctx.moveTo(0, y(base)); ctx.lineTo(W, y(base)); ctx.stroke(); ctx.setLineDash([]); }
   ctx.beginPath(); c.forEach((v, i) => (i ? ctx.lineTo(x(i), y(v)) : ctx.moveTo(x(i), y(v)))); ctx.strokeStyle = col; ctx.lineWidth = 1.2; ctx.stroke();
   ctx.lineTo(x(c.length - 1), H); ctx.lineTo(x(0), H); ctx.closePath();
   const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, col + '55'); g.addColorStop(1, col + '00'); ctx.fillStyle = g; ctx.fill();
