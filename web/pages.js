@@ -158,24 +158,81 @@ $('#optExp').addEventListener('change', (e) => { optState.exp[state.mkt] = e.tar
 $('#optRange').addEventListener('change', () => PAGES.options.render(true));
 $('#optSym').addEventListener('keydown', (e) => { if (e.key === 'Enter') { optState.sym = e.target.value.trim().toUpperCase(); optState.exp.us = ''; PAGES.options.refresh(true); } });
 
-/* ---------- 觀察（新聞） ---------- */
-const newsState = { market: [] };
+/* ---------- 資訊（公司資料、營收、EPS、股利、公告、新聞） ---------- */
+const infoState = { seq: 0, cache: {} };
+const icard = (title, body, extra = '') => `<div class="icard ${extra}"><div class="icard-h">${title}</div><div class="icard-b">${body}</div></div>`;
+const kvTable = (rows) => `<table class="kv">${rows.filter(([, v]) => v != null && v !== '' && v !== 'null' && !/^（?）?$/.test(String(v)) && v !== '／').map(([k, v]) => `<tr><th>${esc(k)}</th><td>${/^https?:\/\//.test(v) ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</td></tr>`).join('')}</table>`;
+function ibars(items, fmt, opt = {}) { // 簡易長條圖：items = [{label, a, b?}]
+  const vals = items.flatMap((x) => [x.a, x.b]).filter((v) => v != null), mx = Math.max(1e-9, ...vals.map(Math.abs));
+  return `<div class="ibars">${items.map((x) => `<div class="ibar"><div class="ibar-v">${x.a != null ? fmt(x.a) : '-'}</div><div class="ibar-c">
+      ${x.b != null ? `<i class="est" style="height:${(Math.abs(x.b) / mx) * 100}%" title="${opt.bLabel || ''} ${fmt(x.b)}"></i>` : ''}
+      <i class="${(x.a ?? 0) >= 0 ? 'pos' : 'neg'}" style="height:${(Math.abs(x.a ?? 0) / mx) * 100}%"></i></div><div class="ibar-l">${esc(x.label)}</div></div>`).join('')}</div>
+    ${opt.legend ? `<div class="ilegend">${opt.legend}</div>` : ''}`;
+}
 PAGES.news = {
-  async load() {
-    $('#newsCat').hidden = true;
-    const code = state.code, idx = code === 't00' || code.includes('^');
-    $('#newsStockTitle').textContent = idx ? '個股新聞（請先選擇個股）' : `${nameOf(code)} 新聞`;
-    $('#newsStock').innerHTML = idx ? '<div class="empty">在自選清單點選一檔股票</div>' : '<div class="empty">載入中…</div>';
-    $('#newsMarket').innerHTML = '<div class="empty">載入中…</div>';
+  async load(force) {
+    const code = state.code, idx = code === 't00' || code.includes('^') || code.startsWith('Y.') || code.startsWith('FX.');
+    $('#infoTitle').textContent = idx ? '資訊' : `${nameOf(code)}　${showCode(code)}`;
+    $('#infoSub').textContent = idx ? '請先在自選清單選一檔個股' : '公司資料、營收、EPS、股利、公告與新聞';
+    const seq = ++infoState.seq;
+    if (idx) { $('#infoBody').innerHTML = '<div class="info-col"><div class="empty">指數沒有公司資訊，請先選擇個股</div></div><div class="info-col" id="infoMarket"></div>'; this.market(); return; }
+    if (!infoState.cache[code] || force) {
+      $('#infoBody').innerHTML = '<div class="empty">載入個股資訊…（第一次需要幾秒）</div>';
+      try { infoState.cache[code] = await api('/api/info?code=' + encodeURIComponent(code)); } catch (e) { $('#infoBody').innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; return; }
+    }
+    if (seq !== infoState.seq || state.view !== 'news') return;
+    this.render(infoState.cache[code]);
+    this.market();
+  },
+  render(d) {
+    const tw = d.market === 'tw', q = state.quotes[d.code], L = [], R = [];
+    if (tw) {
+      const v = d.valuation || {}, r = d.revenue;
+      L.push(icard('關鍵數據', `<div class="stat-grid">
+        ${[['本益比', v.pe ? fmtP(v.pe) : '-'], ['殖利率', v.yield != null ? fmtP(v.yield) + '%' : '-'], ['股價淨值比', v.pb ? fmtP(v.pb) : '-'], ['現價', fmtP(q?.price)]].map(([k, x]) => `<div><span>${k}</span><b class="num">${x}</b></div>`).join('')}</div>
+        <div class="hint">資料日期 ${esc(v.date || '-')}（證交所／櫃買中心）</div>`));
+      if (r) L.push(icard(`月營收　<span class="muted small">${esc(r.month)}　${esc(r.industry || '')}</span>`, `<div class="stat-grid">
+        <div><span>當月營收</span><b class="num">${fmtVol(r.cur * 1000)}</b></div>
+        <div><span>月增率</span><b class="num ${cls(r.mom)}">${sign(r.mom)}${fmtP(r.mom)}%</b></div>
+        <div><span>年增率</span><b class="num ${cls(r.yoy)}">${sign(r.yoy)}${fmtP(r.yoy)}%</b></div>
+        <div><span>今年累計</span><b class="num">${fmtVol(r.ytd * 1000)}</b></div>
+        <div><span>累計年增</span><b class="num ${cls(r.ytdYoy)}">${sign(r.ytdYoy)}${fmtP(r.ytdYoy)}%</b></div>
+        <div><span>去年同月</span><b class="num">${fmtVol(r.lastYear * 1000)}</b></div></div>
+        ${r.note && r.note !== '-' ? `<div class="hint">公司說明：${esc(r.note)}</div>` : ''}`));
+    } else {
+      L.push(icard('關鍵數據', `<div class="stat-grid">${(d.stats || []).filter(([, v]) => v != null && v !== 'None – None').map(([k, v]) => `<div><span>${esc(k)}</span><b class="num">${esc(v)}</b></div>`).join('')}</div>`));
+      const a = d.analyst || {};
+      if (a.target) {
+        const pos = a.high > a.low ? Math.min(100, Math.max(0, ((a.price - a.low) / (a.high - a.low)) * 100)) : 50, up = ((a.target - a.price) / a.price) * 100;
+        const REC = { strong_buy: '強力買進', buy: '買進', hold: '持有', underperform: '表現落後', sell: '賣出' };
+        L.push(icard('分析師目標價', `<div class="stat-grid"><div><span>平均目標價</span><b class="num">${fmtP(a.target)}</b></div><div><span>距現價</span><b class="num ${cls(up)}">${sign(up)}${up.toFixed(1)}%</b></div><div><span>評等</span><b>${esc(REC[a.rec] || a.rec || '-')}</b></div><div><span>分析師人數</span><b class="num">${a.count ?? '-'}</b></div></div>
+          <div class="trange"><span class="num">${fmtP(a.low)}</span><div class="trange-bar"><i style="left:${pos}%"></i></div><span class="num">${fmtP(a.high)}</span></div><div class="hint">白點是目前股價在目標價區間（最低～最高）的位置</div>`));
+      }
+      if ((d.events || []).some(([, v]) => v)) L.push(icard('重要日期', kvTable(d.events)));
+    }
+    if ((d.eps || []).length) L.push(icard('每季 EPS（實際 vs 預估）', ibars(d.eps.map((e) => ({ label: e.q, a: e.actual, b: e.estimate })), (v) => fmtP(v), { bLabel: '預估', legend: '<i class="pos"></i>實際　<i class="est"></i>市場預估' })));
+    if ((d.financials || []).length) L.push(icard(`年度營收與淨利　<span class="muted small">${tw ? '新台幣' : '美元'}</span>`, ibars(d.financials.map((f) => ({ label: String(f.year), a: f.revenue, b: f.earnings })), fmtVol, { legend: '<i class="pos"></i>營收　<i class="est"></i>淨利' })));
+    if ((d.dividends || []).length) {
+      const byYear = {}; d.dividends.forEach((x) => { const y = x.date.slice(0, 4); byYear[y] = (byYear[y] || 0) + x.amount; });
+      const years = Object.keys(byYear).sort().slice(-8), l = d.dividends.slice(0, 12);
+      let rows = ''; for (let i = 0; i < l.length; i += 2) rows += `<tr><td class="l num">${l[i].date}</td><td class="num">${fmtP(l[i].amount, 3)}</td><td class="l num">${l[i + 1]?.date || ''}</td><td class="num">${l[i + 1] ? fmtP(l[i + 1].amount, 3) : ''}</td></tr>`;
+      L.push(icard('股利歷史（現金，每年合計）', ibars(years.map((y) => ({ label: y, a: byYear[y] })), (v) => fmtP(v, v < 10 ? 2 : 1)) +
+        `<table class="tbl mini"><thead><tr><th class="l">除息日</th><th>每股股利</th><th class="l">除息日</th><th>每股股利</th></tr></thead><tbody>${rows}</tbody></table>`));
+    }
+    if (tw) L.push(icard('重大訊息（近期）', (d.announcements || []).length ? d.announcements.map((a) => `<details class="ann"><summary><span class="muted num">${esc(a.date)} ${a.time.slice(0, 2)}:${a.time.slice(2, 4)}</span>　${esc(a.title)}</summary><pre>${esc(a.desc)}</pre></details>`).join('') : '<div class="empty" style="padding:10px">最近幾天沒有重大訊息</div>'));
+    L.push(icard('公司資料', kvTable(d.profile || []) + (d.officers?.length ? `<div class="sub-h">主要經營團隊</div>${kvTable(d.officers)}` : '') + (d.summary ? `<div class="sub-h">業務簡介</div><p class="summary">${esc(d.summary)}</p>` : '')));
+    R.push(icard(`個股新聞　<span class="muted small">${(d.news || []).length} 則</span>`, (d.news || []).length ? d.news.map(newsItem).join('') : '<div class="empty">沒有相關新聞</div>', 'flush'));
+    R.push(`<div id="infoMarket">${icard('市場快訊', '<div class="empty">載入中…</div>', 'flush')}</div>`);
+    $('#infoBody').innerHTML = `<div class="info-col">${L.join('')}</div><div class="info-col">${R.join('')}</div>`;
+  },
+  async market() {
     const cat = state.mkt === 'tw' ? '台股' : '國際股';
-    const [s, m] = await Promise.all([idx ? null : api('/api/news?code=' + encodeURIComponent(code)).catch(() => []), api('/api/news').catch(() => [])]);
-    if (state.view !== 'news') return;
-    if (s) $('#newsStock').innerHTML = s.length ? s.map(newsItem).join('') : '<div class="empty">沒有相關新聞</div>';
-    const list = m.filter((n) => n.cat === cat);
-    $('#newsMarket').innerHTML = list.length ? list.map(newsItem).join('') : '<div class="empty">沒有快訊</div>';
+    const m = await api('/api/news').catch(() => []);
+    const list = m.filter((n) => n.cat === cat).slice(0, 30);
+    const box = $('#infoMarket'); if (box) box.innerHTML = icard(`市場快訊　<span class="muted small">${cat}・鉅亨網</span>`, list.length ? list.map(newsItem).join('') : '<div class="empty">沒有快訊</div>', 'flush');
   },
 };
-$('#newsRefresh').addEventListener('click', () => PAGES.news.load());
+$('#newsRefresh').addEventListener('click', () => PAGES.news.load(true));
 
 /* ---------- 日曆 ---------- */
 const calState = { date: null, cache: {} };

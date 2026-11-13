@@ -83,7 +83,7 @@ const cls = (d) => (d > 0 ? 'up' : d < 0 ? 'down' : 'flat');
 const fmtP = (v, d = 2) => (v == null || isNaN(v) ? '--' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fmtInt = (v) => (v == null || isNaN(v) ? '--' : Math.round(v).toLocaleString('en-US'));
 const sign = (v) => (v > 0 ? '+' : '');
-const fmtVol = (v) => { if (v == null || isNaN(v)) return '--'; const a = Math.abs(v); if (a >= 1e8) return (v / 1e8).toFixed(2) + '億'; if (a >= 1e4) return (v / 1e4).toFixed(2) + '萬'; return Math.round(v).toLocaleString(); };
+const fmtVol = (v) => { if (v == null || isNaN(v)) return '--'; const a = Math.abs(v); if (a >= 1e12) return (v / 1e12).toFixed(2) + '兆'; if (a >= 1e8) return (v / 1e8).toFixed(2) + '億'; if (a >= 1e4) return (v / 1e4).toFixed(2) + '萬'; return Math.round(v).toLocaleString(); };
 const isUS = (c) => c.startsWith('US.');
 const isTW = (c) => !c.includes('.') && c !== 't00' && c !== 'o00';
 const isEtf = (c) => /^00/.test(c) || ['US.QQQ', 'US.SPY', 'US.VOO', 'US.SOXX', 'US.SMH', 'US.DIA', 'US.IWM', 'US.TQQQ', 'US.SOXL'].includes(c);
@@ -701,7 +701,7 @@ async function loadSideNews() {
   el.innerHTML = '<div class="empty">載入新聞…</div>';
   try {
     const list = await api('/api/news?code=' + encodeURIComponent(code)); if (seq !== sideNewsSeq) return;
-    el.innerHTML = list.length ? list.map(newsItem).join('') : '<div class="empty">沒有相關新聞</div>';
+    el.innerHTML = '<button class="btn-ghost" style="width:100%;margin-bottom:8px" data-goinfo>完整資訊頁（公司資料、營收、EPS、股利）›</button>' + (list.length ? list.map(newsItem).join('') : '<div class="empty">沒有相關新聞</div>');
   } catch (e) { el.innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; }
 }
 function newsItem(n) {
@@ -714,6 +714,7 @@ function switchSideTab(t) {
   ['Book', 'Inst', 'Trade', 'News'].forEach((n) => ($('#tab' + n).hidden = t !== n.toLowerCase()));
   if (t === 'inst') loadInst(); if (t === 'book') renderBook(); if (t === 'trade') renderTicket(); if (t === 'news') loadSideNews();
 }
+$('#tabNews').addEventListener('click', (e) => { if (e.target.closest('[data-goinfo]')) setView('news'); });
 $('#sideTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) switchSideTab(b.dataset.t); });
 
 /* ---------- 模擬下單 ---------- */

@@ -971,6 +971,152 @@ def calendar(date):
     return out
 
 
+
+# ---------------- 個股資訊 ----------------
+def _open_data(url, ttl=6 * 3600):
+    return cached("od:" + url, ttl, lambda: fetch_json(url, 25))
+
+
+def _find(rows, code, *keys):
+    for r in rows or []:
+        for k in keys:
+            if str(r.get(k, "")).strip() == code:
+                return r
+    return None
+
+
+def _roc_date(s):
+    s = str(s or "").strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}/{s[4:6]}/{s[6:]}"
+    return f"{int(s[:3]) + 1911}/{s[3:5]}/{s[5:7]}" if len(s) == 7 and s.isdigit() else s
+
+
+def _money(v):
+    n = _num(v)
+    return f"{n / 1e8:,.2f} 億元" if n else v
+
+
+def _shares(v):
+    n = _num(v)
+    return f"{n:,.0f} 股（{n / 1000:,.0f} 張）" if n else v
+
+
+def _div_history(code):
+    sym = yahoo_symbol(code)
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}?range=10y&interval=3mo&events=div"
+    d = cached("div:" + sym, 6 * 3600, lambda: fetch_json(url))["chart"]["result"][0]
+    divs = sorted(((d.get("events") or {}).get("dividends") or {}).values(), key=lambda x: -x["date"])
+    return [{"date": datetime.fromtimestamp(x["date"], timezone.utc).strftime("%Y/%m/%d"), "amount": round(x["amount"], 4)} for x in divs[:40]]
+
+
+def _summary(code, modules):
+    sym = yahoo_symbol(code)
+    url = f"https://query2.finance.yahoo.com/v10/finance/quoteSummary/{urllib.parse.quote(sym)}?modules={modules}"
+    r = cached(f"qs:{sym}:{modules}", 3600, lambda: yahoo_auth_json(url))
+    res = (r.get("quoteSummary") or {}).get("result") or [{}]
+    return res[0] or {}
+
+
+def _raw(x):
+    return x.get("raw") if isinstance(x, dict) else x
+
+
+def _fmt(x):
+    if isinstance(x, dict):
+        return x.get("fmt") or x.get("longFmt") or x.get("raw")
+    return x
+
+
+def _eps_fin(s):
+    e = s.get("earnings") or {}
+    eps = [{"q": q.get("date"), "actual": _raw(q.get("actual")), "estimate": _raw(q.get("estimate"))}
+           for q in ((e.get("earningsChart") or {}).get("quarterly") or [])]
+    fin = [{"year": y.get("date"), "revenue": _raw(y.get("revenue")), "earnings": _raw(y.get("earnings"))}
+           for y in ((e.get("financialsChart") or {}).get("yearly") or [])]
+    return eps, fin
+
+
+def tw_info(code):
+    mkt = market_of(code) or "tse"
+    out = {"code": code, "market": "tw", "mkt": mkt}
+    if mkt == "tse":
+        prof = _find(_open_data("https://openapi.twse.com.tw/v1/opendata/t187ap03_L"), code, "公司代號")
+        rev = _find(_open_data("https://openapi.twse.com.tw/v1/opendata/t187ap05_L"), code, "公司代號")
+        val = _find(_open_data("https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", 3600), code, "Code")
+        ann = [r for r in _open_data("https://openapi.twse.com.tw/v1/opendata/t187ap04_L", 900) if str(r.get("公司代號")).strip() == code]
+        if prof:
+            g = prof.get
+            out["profile"] = [["公司名稱", g("公司名稱")], ["英文簡稱", g("英文簡稱")], ["董事長", g("董事長")], ["總經理", g("總經理")],
+                              ["發言人", f"{g('發言人') or ''}（{g('發言人職稱') or ''}）"], ["成立日期", _roc_date(g("成立日期"))],
+                              ["上市日期", _roc_date(g("上市日期"))], ["實收資本額", _money(g("實收資本額"))], ["已發行普通股數", _shares(g("已發行普通股數或TDR原股發行股數"))],
+                              ["簽證會計師事務所", g("簽證會計師事務所")], ["股務代理", g("股票過戶機構")], ["電話", g("總機電話")],
+                              ["地址", g("住址")], ["網址", g("網址")]]
+        if val:
+            out["valuation"] = {"pe": _num(val.get("PEratio")), "yield": _num(val.get("DividendYield")), "pb": _num(val.get("PBratio")), "date": _roc_date(val.get("Date"))}
+        out["announcements"] = [{"date": _roc_date(r.get("發言日期")), "time": str(r.get("發言時間", "")).zfill(6),
+                                 "title": (r.get("主旨 ") or r.get("主旨") or "").strip(), "desc": (r.get("說明") or "").strip()} for r in ann]
+    else:
+        prof = _find(_open_data("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O"), code, "SecuritiesCompanyCode")
+        rev = _find(_open_data("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap05_O"), code, "公司代號")
+        val = _find(_open_data("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis", 3600), code, "SecuritiesCompanyCode")
+        ann = [r for r in _open_data("https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap04_O", 900) if str(r.get("SecuritiesCompanyCode")).strip() == code]
+        if prof:
+            g = prof.get
+            out["profile"] = [["公司名稱", g("CompanyName")], ["英文簡稱", g("Symbol")], ["董事長", g("Chairman")], ["總經理", g("GeneralManager")],
+                              ["發言人", f"{g('Spokesman') or ''}（{g('TitleOfSpokesman') or ''}）"], ["成立日期", _roc_date(g("DateOfIncorporation"))],
+                              ["上櫃日期", _roc_date(g("DateOfListing"))], ["實收資本額", _money(g("Paidin.Capital.NTDollars"))], ["已發行普通股數", _shares(g("IssueShares"))],
+                              ["簽證會計師事務所", g("AccountingFirm")], ["股務代理", g("StockTransferAgent")], ["電話", g("Telephone")],
+                              ["地址", g("Address")], ["網址", g("WebAddress")]]
+        if val:
+            out["valuation"] = {"pe": _num(val.get("PriceEarningRatio")), "yield": _num(val.get("YieldRatio")), "pb": _num(val.get("PriceBookRatio")), "date": _roc_date(val.get("Date"))}
+        out["announcements"] = [{"date": _roc_date(r.get("發言日期")), "time": str(r.get("發言時間", "")).zfill(6),
+                                 "title": (r.get("主旨") or "").strip(), "desc": (r.get("說明") or "").strip()} for r in ann]
+    if rev:
+        ym = str(rev.get("資料年月", ""))
+        out["revenue"] = {"month": f"{int(ym[:3]) + 1911}/{ym[3:]}" if len(ym) == 5 else ym, "industry": rev.get("產業別"),
+                          "cur": _num(rev.get("營業收入-當月營收")), "prev": _num(rev.get("營業收入-上月營收")), "lastYear": _num(rev.get("營業收入-去年當月營收")),
+                          "mom": _num(rev.get("營業收入-上月比較增減(%)")), "yoy": _num(rev.get("營業收入-去年同月增減(%)")),
+                          "ytd": _num(rev.get("累計營業收入-當月累計營收")), "ytdLast": _num(rev.get("累計營業收入-去年累計營收")),
+                          "ytdYoy": _num(rev.get("累計營業收入-前期比較增減(%)")), "note": (rev.get("備註") or "").strip()}
+    out["dividends"] = _safe(_div_history, code, [])
+    s = _safe(lambda c: _summary(c, "earnings,financialData"), code, {})
+    out["eps"], out["financials"] = _eps_fin(s)
+    return out
+
+
+def us_info(code):
+    s = _summary(code, "assetProfile,summaryDetail,defaultKeyStatistics,financialData,calendarEvents,earnings,price")
+    ap, sd, ks, fd, ce, pr = (s.get(k) or {} for k in ("assetProfile", "summaryDetail", "defaultKeyStatistics", "financialData", "calendarEvents", "price"))
+    out = {"code": code, "market": "us"}
+    out["profile"] = [["公司名稱", pr.get("longName") or pr.get("shortName")], ["產業", f"{ap.get('sector') or ''}／{ap.get('industry') or ''}"],
+                      ["員工人數", f"{ap['fullTimeEmployees']:,}" if ap.get("fullTimeEmployees") else None], ["交易所", pr.get("exchangeName")],
+                      ["地址", ", ".join(x for x in (ap.get("address1"), ap.get("city"), ap.get("state"), ap.get("country")) if x)],
+                      ["電話", ap.get("phone")], ["網址", ap.get("website")]]
+    out["officers"] = [[o.get("name"), o.get("title")] for o in (ap.get("companyOfficers") or [])[:5]]
+    out["summary"] = ap.get("longBusinessSummary")
+    out["stats"] = [["市值", _fmt(sd.get("marketCap")) or _fmt(pr.get("marketCap"))], ["本益比 (TTM)", _fmt(sd.get("trailingPE"))], ["預估本益比", _fmt(sd.get("forwardPE"))],
+                    ["每股盈餘 (TTM)", _fmt(ks.get("trailingEps"))], ["股價淨值比", _fmt(ks.get("priceToBook"))], ["殖利率", _fmt(sd.get("dividendYield"))],
+                    ["Beta", _fmt(sd.get("beta"))], ["52 週區間", f"{_fmt(sd.get('fiftyTwoWeekLow'))} – {_fmt(sd.get('fiftyTwoWeekHigh'))}"],
+                    ["營收 (TTM)", _fmt(fd.get("totalRevenue"))], ["營收成長 (YoY)", _fmt(fd.get("revenueGrowth"))], ["毛利率", _fmt(fd.get("grossMargins"))],
+                    ["營業利益率", _fmt(fd.get("operatingMargins"))], ["淨利率", _fmt(fd.get("profitMargins"))], ["股東權益報酬率", _fmt(fd.get("returnOnEquity"))],
+                    ["現金", _fmt(fd.get("totalCash"))], ["負債", _fmt(fd.get("totalDebt"))], ["流通股數", _fmt(ks.get("sharesOutstanding"))],
+                    ["放空比例", _fmt(ks.get("shortPercentOfFloat"))]]
+    out["analyst"] = {"target": _raw(fd.get("targetMeanPrice")), "high": _raw(fd.get("targetHighPrice")), "low": _raw(fd.get("targetLowPrice")),
+                      "rec": fd.get("recommendationKey"), "count": _raw(fd.get("numberOfAnalystOpinions")), "price": _raw(fd.get("currentPrice"))}
+    ed = (ce.get("earnings") or {}).get("earningsDate") or []
+    out["events"] = [["下次財報", " ~ ".join(_fmt(x) for x in ed[:2]) if ed else None], ["除息日", _fmt(ce.get("exDividendDate"))], ["配息日", _fmt(ce.get("dividendDate"))]]
+    out["eps"], out["financials"] = _eps_fin(s)
+    out["dividends"] = _safe(_div_history, code, [])
+    return out
+
+
+def stock_info(code):
+    info = tw_info(code) if is_tw(code) else us_info(code)
+    info["news"] = _safe(news, code, [])
+    return info
+
+
 # ---------------- HTTP ----------------
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
@@ -1024,6 +1170,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(tw_options(q.get("exp")) if und == "TXO" else us_options(und, q.get("exp")))
             elif u.path == "/api/futures":
                 self.send_json(tw_futures())
+            elif u.path == "/api/info":
+                self.send_json(stock_info(q["code"]))
             elif u.path == "/api/news":
                 self.send_json(news(q.get("code")))
             elif u.path == "/api/calendar":

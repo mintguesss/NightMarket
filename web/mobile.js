@@ -39,7 +39,7 @@
       const r = b.getBoundingClientRect();
       openMenu(r.left - 120, r.top - 250, [
         { label: '期權', icon: '▦', act: () => setView('options') },
-        { label: '觀察（新聞）', icon: '◉', act: () => setView('news') },
+        { label: '資訊（新聞、財報）', icon: '◉', act: () => setView('news') },
         { label: '日曆', icon: '▣', act: () => setView('calendar') },
         { label: '大盤走勢', icon: '↗', act: () => selectCode(MKT_INDEX[state.mkt]) },
         'sep',
