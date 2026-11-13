@@ -705,16 +705,16 @@ async function loadSideNews() {
   } catch (e) { el.innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; }
 }
 function newsItem(n) {
-  const t = n.time ? new Date(n.time * 1000).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+  const ago = n.time ? (Date.now() / 1000 - n.time) : null;
+  const t = ago == null ? '' : ago < 3600 ? `${Math.max(1, Math.round(ago / 60))} 分鐘前` : ago < 86400 ? `${Math.round(ago / 3600)} 小時前` : ago < 172800 ? '昨天 ' + new Date(n.time * 1000).toTimeString().slice(0, 5) : new Date(n.time * 1000).toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
   return `<a class="news-item" href="${esc(n.link)}" target="_blank" rel="noopener"><div class="t">${esc(n.title)}</div>${n.summary ? `<div class="sm">${esc(n.summary)}</div>` : ''}<div class="m">${esc(n.publisher || '')}${n.cat ? '・' + esc(n.cat) : ''}　${t}</div></a>`;
 }
 function switchSideTab(t) {
   state.sideTab = t;
   $$('#sideTabs button').forEach((x) => x.classList.toggle('active', x.dataset.t === t));
-  ['Book', 'Inst', 'Trade', 'News'].forEach((n) => ($('#tab' + n).hidden = t !== n.toLowerCase()));
-  if (t === 'inst') loadInst(); if (t === 'book') renderBook(); if (t === 'trade') renderTicket(); if (t === 'news') loadSideNews();
+  ['Book', 'Inst', 'Trade'].forEach((n) => ($('#tab' + n).hidden = t !== n.toLowerCase()));
+  if (t === 'inst') loadInst(); if (t === 'book') renderBook(); if (t === 'trade') renderTicket();
 }
-$('#tabNews').addEventListener('click', (e) => { if (e.target.closest('[data-goinfo]')) setView('news'); });
 $('#sideTabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) switchSideTab(b.dataset.t); });
 
 /* ---------- 模擬下單 ---------- */
@@ -780,6 +780,8 @@ function setView(v) {
   state.view = v;
   $$('#nav [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   ['Chart', 'Market', 'Rank', 'Options', 'News', 'Calendar', 'Paper'].forEach((n) => ($('#view' + n).hidden = n.toLowerCase() !== v));
+  $('#app').classList.toggle('full-view', v === 'calendar'); // 日曆頁全寬
+  setTimeout(() => draw.resize(), 60);
   if (v === 'chart') { draw.resize(); } else PAGES[v]?.load();
 }
 $('#nav').addEventListener('click', (e) => {
@@ -949,7 +951,7 @@ function selectCode(code) {
   state.code = code; store.set('tw.code.' + state.mkt, code); state.ticket.code = null;
   draw.setTool('cursor'); draw.setItems(store.get('tw.draw.' + code, []));
   renderWatch(); renderSide(); loadKline(); refreshQuotes();
-  if (state.sideTab === 'inst' && isTW(code)) loadInst(); if (state.sideTab === 'trade') renderTicket(); if (state.sideTab === 'news') loadSideNews();
+  if (state.sideTab === 'inst' && isTW(code)) loadInst(); if (state.sideTab === 'trade') renderTicket();
 }
 function renderMktSwitch() {
   const m = state.mkt;

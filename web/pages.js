@@ -234,61 +234,93 @@ PAGES.news = {
 };
 $('#newsRefresh').addEventListener('click', () => PAGES.news.load(true));
 
-/* ---------- 日曆 ---------- */
-const calState = { date: null, cache: {} };
-const ymd = (d) => d.toISOString().slice(0, 10);
+/* ---------- 日曆（週檢視） ---------- */
+const FLAG = { 'United States': ['美', '#2f6fd6'], China: ['中', '#d63c3c'], Japan: ['日', '#c2185b'], 'Euro Zone': ['歐', '#3949ab'], Germany: ['德', '#5d4037'], 'United Kingdom': ['英', '#6a1b9a'], France: ['法', '#1565c0'], Italy: ['義', '#2e7d32'], Spain: ['西', '#ef6c00'], Canada: ['加', '#c62828'], Australia: ['澳', '#00838f'], 'New Zealand': ['紐', '#37474f'], 'South Korea': ['韓', '#455a64'], India: ['印', '#f57c00'], Brazil: ['巴', '#388e3c'], Russia: ['俄', '#546e7a'], 'South Africa': ['南', '#827717'], Switzerland: ['瑞', '#b71c1c'] };
+const flagDot = (c) => { const f = FLAG[c] || ['?', '#555c6b']; return `<span class="ic" style="background:${f[1]}">${f[0]}</span>`; };
+const CAL_COUNTRIES = ['United States', 'China', 'Japan', 'Euro Zone', 'United Kingdom', 'Germany', 'South Korea', 'Australia', 'Canada'];
+const COUNTRY_ZH_FE = { 'United States': '美國', China: '中國', Japan: '日本', 'Euro Zone': '歐元區', 'United Kingdom': '英國', Germany: '德國', 'South Korea': '南韓', Australia: '澳洲', Canada: '加拿大' };
+const calState = { week: null, month: null, tab: { tw: 'focus', us: 'focus' }, cache: {}, countries: store.get('tw.calCountries', { tw: ['United States', 'China', 'Japan'], us: ['United States'] }) };
+const ymdLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const weekStart = (d) => { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); x.setHours(0, 0, 0, 0); return x; };
+const hashColor = (s) => { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) % 360; return `hsl(${h} 55% 45%)`; };
 PAGES.calendar = {
   async load() {
-    if (!calState.date) { const n = state.mkt === 'tw' ? twNow() : new Date(); calState.date = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`; }
-    $('#calDate').value = calState.date;
-    $('#calBody').innerHTML = '<div class="empty">載入日曆…</div>';
-    try { if (!calState.cache[calState.date]) calState.cache[calState.date] = await api('/api/calendar?date=' + calState.date); } catch (e) { $('#calBody').innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; return; }
-    if (state.view === 'calendar') this.render();
-  },
-  render() {
-    const d = calState.cache[calState.date], tw = state.mkt === 'tw', mine = $('#calMine').checked, day = calState.date.replace(/-/g, '');
-    // 週列
-    const base = new Date(calState.date + 'T00:00:00Z'), wd = (base.getUTCDay() + 6) % 7, W = ['一', '二', '三', '四', '五', '六', '日'];
-    const hol = new Set((d.twHolidays || []).map((h) => h.date));
-    $('#calWeek').innerHTML = W.map((w, i) => {
-      const x = new Date(base); x.setUTCDate(base.getUTCDate() - wd + i); const s = ymd(x), k = s.replace(/-/g, '');
-      const divN = tw ? (d.twDividends || []).filter((r) => r.date === k).length : 0;
-      return `<div class="day ${s === calState.date ? 'on' : ''} ${tw && hol.has(k) ? 'hol' : ''}" data-d="${s}"><div class="w">週${w}</div><div class="d">${x.getUTCMonth() + 1}/${x.getUTCDate()}</div><div class="b">${tw && hol.has(k) ? '休市' : divN ? `除權息 ${divN}` : ''}</div></div>`;
-    }).join('');
-    let html = '';
-    if (tw) {
-      let divs = (d.twDividends || []).filter((r) => r.date >= day).sort((a, b) => a.date.localeCompare(b.date));
-      if (mine) divs = divs.filter((r) => state.watch.includes(r.code));
-      const today = divs.filter((r) => r.date === day), later = divs.filter((r) => r.date !== day);
-      const divTbl = (list) => `<table class="tbl"><thead><tr><th class="l">日期</th><th class="l">股票</th><th class="c">類型</th><th>現金股利</th><th>股票股利</th><th></th></tr></thead><tbody>${list.map((r) => `<tr data-code="${esc(r.code)}"><td class="l num">${r.date.slice(4, 6)}/${r.date.slice(6)}</td><td class="l">${nmCell(r.code, r.name)}${state.watch.includes(r.code) ? '<span class="tag tw">自選</span>' : ''}</td><td class="c">除${esc(r.type)}</td><td class="num">${r.cash ? fmtP(r.cash, 4) : '-'}</td><td class="num">${esc(r.stock || '-')}</td><td><button class="act" data-add="${esc(r.code)}">${state.watch.includes(r.code) ? '♥' : '+ 自選'}</button></td></tr>`).join('')}</tbody></table>`;
-      html += `<div class="sec-title"><b>${calState.date} 除權息</b><span>${today.length} 檔</span></div>${today.length ? divTbl(today) : '<div class="empty">這天沒有除權息</div>'}`;
-      html += `<div class="sec-title"><b>之後的除權息預告</b><span>證交所公告，${later.length} 檔</span></div>${later.length ? divTbl(later) : '<div class="empty">沒有資料</div>'}`;
-      const hs = (d.twHolidays || []).filter((h) => h.date >= day);
-      html += `<div class="sec-title"><b>台股休市日</b></div>${hs.length ? `<table class="tbl"><tbody>${hs.map((h) => `<tr><td class="l num">${h.date.slice(0, 4)}/${h.date.slice(4, 6)}/${h.date.slice(6)}</td><td class="l">${esc(h.name)}</td><td class="l muted small">${esc(h.desc || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">今年沒有剩餘休市日資料</div>'}`;
-    } else {
-      const capNum = (s) => +String(s || '').replace(/[$,]/g, '') || 0;
-      let er = [...(d.earnings || [])].sort((a, b) => capNum(b.cap) - capNum(a.cap));
-      if (mine) er = er.filter((r) => state.watch.includes('US.' + r.symbol));
-      const tmap = { 'time-pre-market': '盤前', 'time-after-hours': '盤後', 'time-not-supplied': '未定' };
-      html += `<div class="sec-title"><b>${calState.date} 美股財報</b><span>${er.length} 家，依市值排序</span></div>${er.length ? `<table class="tbl"><thead><tr><th class="l">公司</th><th class="c">時間</th><th>市值</th><th>預估 EPS</th><th>去年同期 EPS</th><th></th></tr></thead><tbody>${er.slice(0, 150).map((r) => `<tr data-code="US.${esc(r.symbol)}"><td class="l">${nmCell('US.' + r.symbol, r.name)}${state.watch.includes('US.' + r.symbol) ? '<span class="tag us">自選</span>' : ''}</td><td class="c">${tmap[r.time] || esc(r.time || '')}</td><td class="num">${esc(r.cap || '-')}</td><td class="num">${esc(r.eps || '-')}</td><td class="num">${esc(r.lastEps || '-')}</td><td><button class="act" data-add="US.${esc(r.symbol)}">${state.watch.includes('US.' + r.symbol) ? '♥' : '+ 自選'}</button></td></tr>`).join('')}</tbody></table>` : '<div class="empty">這天沒有財報（或只看自選時沒有符合）</div>'}`;
-      const ev = [...(d.economic || [])].sort((a, b) => (b.country === 'United States') - (a.country === 'United States') || String(a.time).localeCompare(String(b.time)));
-      const toTW = (t) => { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); if (!m) return t || ''; const h = (+m[1] + 8) % 24; return `${String(h).padStart(2, '0')}:${m[2]}`; };
-      html += `<div class="sec-title"><b>經濟數據</b><span>時間為台北時間；美國數據排前面</span></div>${ev.length ? `<table class="tbl"><thead><tr><th class="l">時間</th><th class="l">國家</th><th class="l">事件</th><th>實際</th><th>預期</th><th>前值</th></tr></thead><tbody>${ev.map((r) => `<tr><td class="l num">${toTW(r.time)}</td><td class="l ${r.country === 'United States' ? 'imp' : ''}">${esc(r.country)}</td><td class="l">${esc(r.event)}</td><td class="num">${esc(r.actual || '')}</td><td class="num">${esc(r.consensus || '')}</td><td class="num">${esc(r.previous || '')}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">沒有經濟數據</div>'}`;
+    if (!calState.week) { calState.week = weekStart(twNow()); calState.month = new Date(calState.week.getFullYear(), twNow().getMonth(), 1); }
+    this.sidebar();
+    const key = state.mkt + ymdLocal(calState.week);
+    if (!calState.cache[key]) {
+      $('#calWeek').innerHTML = '<div class="empty" style="grid-column:1/-1">載入本週日曆…（第一次約需 10 秒）</div>';
+      try { calState.cache[key] = await api(`/api/calweek?start=${ymdLocal(calState.week)}&mkt=${state.mkt}`); }
+      catch (e) { $('#calWeek').innerHTML = `<div class="empty" style="grid-column:1/-1">載入失敗：${esc(e.message)}</div>`; return; }
     }
-    $('#calBody').innerHTML = html;
+    if (state.view !== 'calendar' || key !== state.mkt + ymdLocal(calState.week)) return;
+    this.render(calState.cache[key]);
+  },
+  tabs() { return state.mkt === 'us' ? [['focus', '本週焦點'], ['earn', '業績'], ['econ', '財經'], ['div', '權息'], ['hol', '休市']] : [['focus', '本週焦點'], ['econ', '財經'], ['div', '權息'], ['hol', '休市']]; },
+  sidebar() {
+    const m = calState.month, ws = ymdLocal(calState.week), today = ymdLocal(twNow());
+    $('#mcalTitle').textContent = `${m.getFullYear()}/${String(m.getMonth() + 1).padStart(2, '0')}`;
+    const start = weekStart(m); let h = ['日', '一', '二', '三', '四', '五', '六'].map((x) => `<div class="h">${x}</div>`).join('');
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i); const s = ymdLocal(d), inWk = ymdLocal(weekStart(d)) === ws;
+      h += `<div class="d ${d.getMonth() !== m.getMonth() ? 'out' : ''} ${inWk ? 'wk' : ''} ${inWk && d.getDay() === 0 ? 'first' : ''} ${inWk && d.getDay() === 6 ? 'last' : ''} ${s === today ? 'today' : ''}" data-d="${s}">${d.getDate()}</div>`;
+      if (i >= 34 && d.getDay() === 6 && d.getMonth() !== m.getMonth()) break;
+    }
+    $('#mcal').innerHTML = h;
+    const sel = calState.countries[state.mkt];
+    $('#calCountries').innerHTML = CAL_COUNTRIES.map((c) => `<label class="chk"><input type="checkbox" data-c="${c}" ${sel.includes(c) ? 'checked' : ''}> ${COUNTRY_ZH_FE[c]}</label>`).join('');
+    const t = calState.tab[state.mkt]; if (!this.tabs().some(([k]) => k === t)) calState.tab[state.mkt] = 'focus';
+    $('#calTabs').innerHTML = this.tabs().map(([k, n]) => `<button data-ct="${k}" class="${k === calState.tab[state.mkt] ? 'active' : ''}">${n}</button>`).join('');
+  },
+  filter(evs) {
+    const tab = calState.tab[state.mkt], mine = $('#calMine').checked, sel = calState.countries[state.mkt], tw = state.mkt === 'tw';
+    const inWatch = (e) => state.watch.includes(e.code);
+    return evs.filter((e) => {
+      if (e.type === 'econ') return (tab === 'focus' || tab === 'econ') && sel.includes(e.country);
+      if (e.type === 'hol') return tab === 'focus' || tab === 'hol';
+      if (e.type === 'earn') { if (tab !== 'focus' && tab !== 'earn') return false; if (mine) return inWatch(e); return tab === 'earn' || inWatch(e) || e.cap >= 5e10; }
+      if (e.type === 'div') { if (tab !== 'focus' && tab !== 'div') return false; if (mine) return inWatch(e); return tab === 'div' || inWatch(e) || tw; }
+      return false;
+    }).sort((a, b) => (b.type === 'hol') - (a.type === 'hol') || inWatch(b) - inWatch(a) || String(a.time || '99').localeCompare(String(b.time || '99')) || (b.cap || 0) - (a.cap || 0));
+  },
+  card(e) {
+    const mine = e.code && state.watch.includes(e.code), mineTag = mine ? '<span class="tg mine">自選</span>' : '';
+    if (e.type === 'econ') {
+      const res = [e.actual && `實際 ${e.actual}`, e.consensus && `預期 ${e.consensus}`, e.previous && `前值 ${e.previous}`].filter(Boolean).join('　');
+      return `<div class="ev" title="${esc(res)}">${flagDot(e.country)}<div class="tx"><div class="tt">${esc(e.countryZh)} ${esc(e.title)}</div><div class="sb">${esc(e.time || '')}${e.actual ? `<span class="up">　實際 ${esc(e.actual)}</span>` : ''}</div></div></div>`;
+    }
+    if (e.type === 'hol') return `<div class="ev hol"><span class="ic">休</span><div class="tx"><div class="tt">${esc(e.title)}</div><div class="sb">${esc(e.desc || '')}</div></div></div>`;
+    const sym = e.symbol || '', ic = `<span class="ic" style="background:${hashColor(sym)}">${esc(sym.replace(/^\d+/, (m) => m.slice(0, 2)).slice(0, 2))}</span>`;
+    const name = state.mkt === 'tw' ? `${sym} ${e.title}` : `${sym} ${e.title || ''}`;
+    if (e.type === 'earn') {
+      const ses = e.session === 'pre' ? '<span class="tg pre">☀ 盤前</span>' : e.session === 'post' ? '<span class="tg post">☾ 盤後</span>' : '';
+      return `<div class="ev click" data-code="${esc(e.code)}" title="預估 EPS ${esc(e.eps || '-')}／去年同期 ${esc(e.lastEps || '-')}"><span>${ic}</span><div class="tx"><div class="tt">${esc(name)}</div><div class="sb"><span class="tg">US</span>${ses}${mineTag}${e.eps ? `預估 ${esc(e.eps)}` : ''}</div></div></div>`;
+    }
+    const amt = state.mkt === 'tw' ? `除${esc(e.kind || '息')}${e.amount ? ' ' + fmtP(e.amount, 4).replace(/0+$/, '').replace(/\.$/, '') + ' 元' : ''}${e.stock ? '　配股 ' + esc(e.stock) : ''}` : `除息 $${e.amount ?? '-'}${e.pay ? '　發放 ' + esc(e.pay) : ''}`;
+    return `<div class="ev click" data-code="${esc(e.code)}"><span>${ic}</span><div class="tx"><div class="tt">${esc(name)}</div><div class="sb"><span class="tg">${state.mkt === 'tw' ? 'TW' : 'US'}</span>${mineTag}${amt}</div></div></div>`;
+  },
+  render(d) {
+    const today = ymdLocal(twNow()), W = ['週日', '週一', '週二', '週三', '週四', '週五', '週六'], LIMIT = 80;
+    $('#calWeek').innerHTML = d.days.map((day, i) => {
+      const evs = this.filter(d.events[day] || []), shown = evs.slice(0, LIMIT);
+      return `<div class="wcol ${day === today ? 'today' : ''}"><div class="wcol-h">${W[i]} <span class="dt num">${+day.slice(5, 7)}/${day.slice(8)}</span><span class="cnt">${evs.length || ''}</span></div>
+        <div class="wcol-b">${shown.map((e) => this.card(e)).join('') || '<div class="more-ev">沒有事件</div>'}${evs.length > LIMIT ? `<div class="more-ev">還有 ${evs.length - LIMIT} 筆（可勾選「只看自選」或切到單一分類）</div>` : ''}</div></div>`;
+    }).join('');
+    $('#calUpd').textContent = `${d.days[0].slice(5).replace('-', '/')} – ${d.days[6].slice(5).replace('-', '/')}　台北時間`;
   },
 };
-$('#calWeek').addEventListener('click', (e) => { const x = e.target.closest('[data-d]'); if (x) { calState.date = x.dataset.d; PAGES.calendar.load(); } });
-$('#calDate').addEventListener('change', (e) => { if (e.target.value) { calState.date = e.target.value; PAGES.calendar.load(); } });
-const shiftDay = (n) => { const x = new Date(calState.date + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); calState.date = ymd(x); PAGES.calendar.load(); };
-$('#calPrev').addEventListener('click', () => shiftDay(-1));
-$('#calNext').addEventListener('click', () => shiftDay(1));
-$('#calToday').addEventListener('click', () => { calState.date = null; PAGES.calendar.load(); });
-$('#calMine').addEventListener('change', () => PAGES.calendar.render());
-$('#calBody').addEventListener('click', (e) => {
-  const add = e.target.closest('[data-add]'); if (add) { e.stopPropagation(); const c = add.dataset.add; state.watch.includes(c) ? removeWatch(c) : addWatch(c); setTimeout(() => PAGES.calendar.render(), 300); return; }
-  const r = e.target.closest('tr[data-code]'); if (r) { selectCode(r.dataset.code); setView('chart'); }
+$('#mcal').addEventListener('click', (e) => { const x = e.target.closest('[data-d]'); if (!x) return; const d = new Date(x.dataset.d + 'T00:00:00'); calState.week = weekStart(d); calState.month = new Date(d.getFullYear(), d.getMonth(), 1); PAGES.calendar.load(); });
+$('#mcalPrev').addEventListener('click', () => { calState.month = new Date(calState.month.getFullYear(), calState.month.getMonth() - 1, 1); PAGES.calendar.sidebar(); });
+$('#mcalNext').addEventListener('click', () => { calState.month = new Date(calState.month.getFullYear(), calState.month.getMonth() + 1, 1); PAGES.calendar.sidebar(); });
+$('#calToday').addEventListener('click', () => { calState.week = null; PAGES.calendar.load(); });
+$('#calTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-ct]'); if (!b) return; calState.tab[state.mkt] = b.dataset.ct; PAGES.calendar.sidebar(); PAGES.calendar.load(); });
+$('#calMine').addEventListener('change', () => PAGES.calendar.load());
+$('#calCountries').addEventListener('change', (e) => {
+  const c = e.target.dataset.c; if (!c) return; const a = calState.countries[state.mkt];
+  e.target.checked ? a.includes(c) || a.push(c) : a.splice(a.indexOf(c), 1);
+  store.set('tw.calCountries', calState.countries); PAGES.calendar.load();
 });
+$('#calWeek').addEventListener('click', (e) => { const x = e.target.closest('.ev.click[data-code]'); if (x) { selectCode(x.dataset.code); setView('chart'); } });
 
 /* ---------- 模擬倉 ---------- */
 PAGES.paper = {

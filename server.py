@@ -1080,6 +1080,8 @@ def tw_info(code):
                           "ytd": _num(rev.get("累計營業收入-當月累計營收")), "ytdLast": _num(rev.get("累計營業收入-去年累計營收")),
                           "ytdYoy": _num(rev.get("累計營業收入-前期比較增減(%)")), "note": (rev.get("備註") or "").strip()}
     out["dividends"] = _safe(_div_history, code, [])
+    if prof:
+        out["shares"] = _num(prof.get("已發行普通股數或TDR原股發行股數") or prof.get("IssueShares"))
     s = _safe(lambda c: _summary(c, "earnings,financialData"), code, {})
     out["eps"], out["financials"] = _eps_fin(s)
     return out
@@ -1108,6 +1110,7 @@ def us_info(code):
     out["events"] = [["下次財報", " ~ ".join(_fmt(x) for x in ed[:2]) if ed else None], ["除息日", _fmt(ce.get("exDividendDate"))], ["配息日", _fmt(ce.get("dividendDate"))]]
     out["eps"], out["financials"] = _eps_fin(s)
     out["dividends"] = _safe(_div_history, code, [])
+    out["shares"] = _raw(ks.get("sharesOutstanding"))
     return out
 
 
@@ -1115,6 +1118,107 @@ def stock_info(code):
     info = tw_info(code) if is_tw(code) else us_info(code)
     info["news"] = _safe(news, code, [])
     return info
+
+
+
+# ---------------- 週日曆 ----------------
+# 紐約證交所休市日（含提早收盤）
+NYSE_HOLIDAYS = {
+    "2026-01-01": "元旦", "2026-01-19": "馬丁路德金恩紀念日", "2026-02-16": "總統日", "2026-04-03": "耶穌受難日",
+    "2026-05-25": "陣亡將士紀念日", "2026-06-19": "六月節", "2026-07-03": "獨立紀念日（補假）", "2026-09-07": "勞動節",
+    "2026-11-26": "感恩節", "2026-11-27": "感恩節翌日（提早 13:00 收盤）", "2026-12-24": "平安夜（提早 13:00 收盤）", "2026-12-25": "聖誕節",
+    "2027-01-01": "元旦", "2027-01-18": "馬丁路德金恩紀念日", "2027-02-15": "總統日", "2027-03-26": "耶穌受難日",
+    "2027-05-31": "陣亡將士紀念日", "2027-06-18": "六月節（補假）", "2027-07-05": "獨立紀念日（補假）", "2027-09-06": "勞動節",
+    "2027-11-25": "感恩節", "2027-11-26": "感恩節翌日（提早 13:00 收盤）", "2027-12-24": "聖誕節（補假）",
+}
+COUNTRY_ZH = {"United States": "美國", "China": "中國", "Japan": "日本", "Euro Zone": "歐元區", "Germany": "德國", "United Kingdom": "英國",
+              "France": "法國", "Italy": "義大利", "Spain": "西班牙", "Canada": "加拿大", "Australia": "澳洲", "New Zealand": "紐西蘭",
+              "South Korea": "南韓", "India": "印度", "Brazil": "巴西", "Russia": "俄羅斯", "South Africa": "南非", "Switzerland": "瑞士"}
+
+
+def _us_dst(d):
+    """美國夏令時間：三月第二個週日 ~ 十一月第一個週日。"""
+    def nth_sunday(y, m, n):
+        first = datetime(y, m, 1)
+        return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+    return nth_sunday(d.year, 3, 2) <= d < nth_sunday(d.year, 11, 1)
+
+
+def _et_to_tw(date_str, hhmm):
+    """Nasdaq 經濟數據時間為美東時間 -> 台北時間 (date, HH:MM)。"""
+    try:
+        h, m = map(int, hhmm.split(":"))
+    except (ValueError, AttributeError):
+        return date_str, None
+    et = datetime.strptime(date_str, "%Y-%m-%d").replace(hour=h, minute=m)
+    tw = et + timedelta(hours=12 if _us_dst(et) else 13)
+    return tw.strftime("%Y-%m-%d"), tw.strftime("%H:%M")
+
+
+def _nas_rows(kind, date):
+    def load():
+        d = fetch_json(f"https://api.nasdaq.com/api/calendar/{kind}?date={date}", 15).get("data") or {}
+        return (d.get("calendar") or {}).get("rows") or d.get("rows") or []
+    return cached(f"nas:{kind}:{date}", 1800, load)
+
+
+def cal_week(start, mkt):
+    """start: 週日 YYYY-MM-DD。回傳 {date: [events]}，時間一律台北時間。"""
+    d0 = datetime.strptime(start, "%Y-%m-%d")
+    days = [(d0 + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    out = {d: [] for d in days}
+
+    def add(date, ev):
+        if date in out:
+            out[date].append(ev)
+    # 經濟數據（前一天也抓，因為時差可能跨日）
+    econ_days = [(d0 + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(-1, 7)]
+    for date, rows in zip(econ_days, POOL.map(lambda d: _safe(lambda x: _nas_rows("economicevents", x), d, []), econ_days)):
+        for r in rows:
+            td, tt = _et_to_tw(date, r.get("gmt"))
+            c = r.get("country")
+            clean = lambda v: (v or "").replace("&nbsp;", "").strip() or None
+            add(td, {"type": "econ", "time": tt, "country": c, "countryZh": COUNTRY_ZH.get(c, c), "title": r.get("eventName"),
+                     "actual": clean(r.get("actual")), "consensus": clean(r.get("consensus")), "previous": clean(r.get("previous"))})
+    if mkt == "us":
+        for date, rows in zip(days, POOL.map(lambda d: _safe(lambda x: _nas_rows("earnings", x), d, []), days)):
+            for r in rows:
+                cap = _num(str(r.get("marketCap") or "").replace("$", "").replace(",", "")) or 0
+                t = {"time-pre-market": "pre", "time-after-hours": "post"}.get(r.get("time"))
+                add(date, {"type": "earn", "code": "US." + r["symbol"], "symbol": r["symbol"], "title": r.get("name"), "cap": cap,
+                           "session": t, "eps": r.get("epsForecast"), "lastEps": r.get("lastYearEPS"), "quarter": r.get("fiscalQuarterEnding")})
+        for date, rows in zip(days, POOL.map(lambda d: _safe(lambda x: _nas_rows("dividends", x), d, []), days)):
+            for r in rows:
+                add(date, {"type": "div", "code": "US." + r["symbol"], "symbol": r["symbol"], "title": r.get("companyName"),
+                           "amount": r.get("dividend_Rate"), "annual": r.get("indicated_Annual_Dividend"), "pay": r.get("payment_Date")})
+        for d in days:
+            if d in NYSE_HOLIDAYS:
+                add(d, {"type": "hol", "title": "美股" + ("提早收盤" if "提早" in NYSE_HOLIDAYS[d] else "休市"), "desc": NYSE_HOLIDAYS[d]})
+    else:
+        try:
+            divs = cached("twdiv", 6 * 3600, lambda: fetch_json("https://openapi.twse.com.tw/v1/exchangeReport/TWT48U_ALL", 20))
+        except Exception:
+            divs = []
+        for r in divs:
+            dd = _roc(r["Date"])
+            dd = f"{dd[:4]}-{dd[4:6]}-{dd[6:]}"
+            add(dd, {"type": "div", "code": r["Code"], "symbol": r["Code"], "title": r["Name"], "kind": r.get("Exdividend"),
+                     "amount": _num(r.get("CashDividend")), "stock": r.get("StockDividendRatio")})
+        try:
+            hol = cached("twhol", 86400, lambda: fetch_json("https://openapi.twse.com.tw/v1/holidaySchedule/holidaySchedule", 20))
+        except Exception:
+            hol = []
+        for h in hol:
+            dd = _roc(h["Date"])
+            name = h.get("Name") or ""
+            if "開始交易" in name or "最後交易" in name:
+                kind = "台股" + ("開始交易" if "開始交易" in name else "最後交易")
+            else:
+                kind = "台股休市"
+            add(f"{dd[:4]}-{dd[4:6]}-{dd[6:]}", {"type": "hol", "title": kind, "desc": name})
+    for d in out:
+        out[d].sort(key=lambda e: (e["type"] != "hol", e.get("time") or "99:99", -(e.get("cap") or 0)))
+    return {"start": start, "days": days, "events": out}
 
 
 # ---------------- HTTP ----------------
@@ -1170,6 +1274,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(tw_options(q.get("exp")) if und == "TXO" else us_options(und, q.get("exp")))
             elif u.path == "/api/futures":
                 self.send_json(tw_futures())
+            elif u.path == "/api/calweek":
+                self.send_json(cal_week(q["start"], q.get("mkt", "tw")))
             elif u.path == "/api/info":
                 self.send_json(stock_info(q["code"]))
             elif u.path == "/api/news":

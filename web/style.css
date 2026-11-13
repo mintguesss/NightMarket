@@ -463,3 +463,88 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .ann pre { white-space: pre-wrap; font: inherit; font-size: 12.5px; color: var(--muted); background: var(--panel2); padding: 10px; border-radius: 6px; margin: 8px 0 0; max-height: 300px; overflow: auto; }
 @media (max-width: 1100px) { .info-grid { grid-template-columns: 1fr; } }
 @media (max-width: 820px) { .info-grid { padding: 10px; gap: 10px; } .ibars { height: 130px; gap: 4px; } }
+
+/* ================= 右側圖示選單與面板 ================= */
+.app { grid-template-columns: 60px var(--lw) 5px minmax(380px, 1fr) 5px var(--rw) 46px; }
+.rail { grid-row: 1; background: var(--panel); border-left: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 4px; }
+.rail button { width: 40px; padding: 7px 0 5px; border-radius: 8px; color: var(--muted); display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; }
+.rail button svg { width: 19px; height: 19px; }
+.rail button:hover { background: var(--panel2); color: var(--text); }
+.rail button.active { color: var(--accent); background: rgba(245,165,36,.12); }
+.side { position: relative; }
+.spanel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.sp-head { display: flex; align-items: center; gap: 8px; padding: 12px 10px 10px 14px; border-bottom: 1px solid var(--line); flex: none; }
+.sp-head b { font-size: 15px; }
+.sp-sub { color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.sp-tabs { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.sp-tabs button { padding: 4px 12px; border-radius: 5px; color: var(--muted); background: var(--panel2); }
+.sp-tabs button.active { color: var(--text); background: #2f3546; font-weight: 600; }
+.sp-body { flex: 1; overflow-y: auto; }
+.sp-body .news-item { padding: 11px 14px; }
+.sp-body .news-item .t { font-size: 14px; }
+.sp-pad { padding: 14px; }
+.sp-k { color: var(--muted); font-size: 12px; }
+.sp-big { font-size: 24px; font-weight: 600; margin-top: 4px; }
+.ann.sp { padding: 10px 14px; }
+.ann.sp summary { list-style: none; }
+.ann.sp summary .t { display: block; font-size: 14px; line-height: 1.45; }
+.ann.sp summary .m { display: block; color: var(--dim); font-size: 11px; margin-top: 4px; }
+.chips-body { padding: 12px 14px; }
+.chips-kv th { width: 76px; }
+.pbar { display: inline-block; width: 90px; height: 6px; border-radius: 3px; background: #3d8bfd55; margin-right: 8px; vertical-align: middle; overflow: hidden; }
+.pbar i { display: block; height: 100%; background: var(--up); }
+.legend-row { display: flex; gap: 14px; font-size: 11px; color: var(--muted); margin-top: 10px; flex-wrap: wrap; }
+.legend-row i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.memo-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.memo-ta { flex: 1; min-height: 260px; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; color: var(--text); padding: 10px; font: inherit; line-height: 1.6; resize: none; outline: none; }
+.app.no-right .side { visibility: hidden; }
+
+/* ================= 週日曆 ================= */
+.cal-wrap { flex: 1; display: flex; min-height: 0; }
+.cal-side { width: 236px; flex: none; border-right: 1px solid var(--line); padding: 12px 14px; overflow-y: auto; }
+.mcal-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
+.mcal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px 0; font-size: 12px; text-align: center; }
+.mcal .h { color: var(--dim); padding: 4px 0; }
+.mcal .d { padding: 5px 0; cursor: pointer; border-radius: 4px; color: var(--text); }
+.mcal .d.out { color: var(--dim); }
+.mcal .d.wk { background: #232838; border-radius: 0; }
+.mcal .d.wk.first { border-radius: 5px 0 0 5px; } .mcal .d.wk.last { border-radius: 0 5px 5px 0; }
+.mcal .d.today { color: #111; background: #e8eaf0; border-radius: 5px; font-weight: 700; }
+.mcal .d:hover:not(.today) { background: var(--sel); }
+.cal-countries { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.cal-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.week { flex: 1; display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); min-height: 0; overflow-x: auto; }
+.wcol { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 150px; }
+.wcol-h { padding: 10px 12px; font-weight: 600; border-bottom: 1px solid var(--line); flex: none; display: flex; gap: 6px; align-items: center; }
+.wcol-h .dt { padding: 1px 6px; border-radius: 4px; }
+.wcol.today .wcol-h .dt { background: #e8eaf0; color: #111; }
+.wcol-h .cnt { margin-left: auto; color: var(--dim); font-size: 11px; font-weight: 400; }
+.wcol-b { flex: 1; overflow-y: auto; padding: 4px 0 16px; }
+.ev { display: flex; gap: 9px; padding: 8px 10px; border-radius: 6px; margin: 0 4px; }
+.ev.click { cursor: pointer; } .ev.click:hover { background: var(--panel2); }
+.ev .ic { width: 22px; height: 22px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; color: #fff; margin-top: 1px; }
+.ev .ic.flag { background: none; font-size: 17px; }
+.ev .tx { min-width: 0; flex: 1; }
+.ev .tt { font-size: 12.5px; line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ev .sb { color: var(--muted); font-size: 11px; margin-top: 3px; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.ev .tg { padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 15px; background: #23324d; color: #7fb3ff; }
+.ev .tg.pre { background: #3a3220; color: #f5c46a; } .ev .tg.post { background: #2b2840; color: #b9a6ff; }
+.ev .tg.mine { background: rgba(245,165,36,.18); color: var(--accent); }
+.ev.hol .ic { background: #3a4050; }
+.more-ev { color: var(--dim); font-size: 11px; padding: 6px 14px; }
+@media (max-width: 820px) {
+  .rail { display: none; }
+  body[data-mpage="detail"] #spQuote { display: contents; }
+  body[data-mpage="detail"] #spInfo, body[data-mpage="detail"] #spChips, body[data-mpage="detail"] #spMemo { display: none !important; }
+  .cal-side { display: none; }
+  .week { grid-template-columns: repeat(7, 78vw); }
+}
+
+.app.full-view { --lw: 0px !important; --rw: 0px !important; }
+.app.full-view .watch, .app.full-view .side, .app.full-view .resizer { visibility: hidden; overflow: hidden; }
+@media (max-width: 820px) {
+  .app.no-right .side, .app.no-left .watch, .app.full-view .side, .app.full-view .watch { visibility: visible !important; overflow: visible; }
+}
+@media (max-width: 820px) {
+  body[data-mpage="detail"] #spQuote[hidden] { display: contents !important; } /* 手機版個股頁固定顯示行情 */
+}
