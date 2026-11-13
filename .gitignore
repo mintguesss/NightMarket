@@ -21,3 +21,5 @@ Thumbs.db
 build/
 dist/
 *.spec
+PROMO.md
+__pycache__/

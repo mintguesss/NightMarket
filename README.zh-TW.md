@@ -1,3 +1,5 @@
+<img src="web/icons/icon-192.png" width="96" alt="NightMarket logo">
+
 # NightMarket 夜市 🏮
 
 *白天看台股，晚上逛美股——台灣人看美股就像逛夜市。*
@@ -68,7 +70,7 @@ python server.py
 | **Android 手機單獨執行** | **否** | 安裝 Termux，`pkg install git python`、clone 這個 repo，執行 `bash deploy/run-android.sh`，用手機 Chrome 開 `http://localhost:8765` |
 | 樹莓派／NAS 常駐 | 否（小主機一直開） | 參考 `deploy/nightmarket.service`（systemd 開機自動執行），搭配 Tailscale |
 | Docker | 依主機而定 | `docker build -t nightmarket .`，`docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=密碼 -v nightmarket-data:/data nightmarket` |
-| Windows 執行檔 | 是 | `py -m pip install pyinstaller` 後執行 `build_exe.bat`，產生 `dist\NightMarket.exe` |
+| Windows 執行檔 | 是 | 到 [Releases](../../releases) 下載 `NightMarket.exe`（GitHub Actions 自動打包），或自己執行 `py -m pip install pyinstaller` 後跑 `build_exe.bat` |
 
 **加入主畫面（PWA）**：用 `localhost` 或 HTTPS（例如 Tailscale serve）開啟時，手機瀏覽器選單的「加入主畫面」會變成一個 App 圖示，全螢幕開啟。iPhone 用 Safari 的「分享 → 加入主畫面」。
 

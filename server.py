@@ -1426,7 +1426,8 @@ def check_strategies(force=False):
         if not st.get("enabled") or not (st.get("alert") or st.get("auto_trade")):
             continue
         mkt = st.get("mkt", "tw")
-        if not force and not _market_open(mkt):
+        live = _market_open(mkt)
+        if not force and not live:
             continue
         codes = (st.get("universe") or [])[:30]
         for code in codes:
@@ -1449,12 +1450,19 @@ def check_strategies(force=False):
                 key = (st["id"], code, kind, day)
                 if key in _fired:
                     continue
-                _fired[key] = True
+                # 非交易時段手動檢查時，自動交易的策略只回報訊號、不下單，也不記為已觸發，開盤後監控仍會照常下單
+                hold = bool(st.get("auto_trade")) and not live
+                if not hold:
+                    _fired[key] = True
                 name = (q or {}).get("name") or code
                 price = bars[-1]["c"]
                 ev = {"t": int(time.time()), "sid": st["id"], "strategy": st.get("name"), "code": code, "name": name,
                       "kind": kind, "price": price, "detail": S.explain(grp, bars)}
                 trade_msg = ""
+                if hold:
+                    ev["trade"] = "非交易時段，未下單（開盤後監控會自動判斷）"
+                    out.append(ev)
+                    continue
                 if st.get("auto_trade"):
                     ccy = ccy_of(code)
                     if kind == "entry" and not pos:

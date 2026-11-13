@@ -1,4 +1,6 @@
-"""產生 PWA 圖示（純 Python，不需要額外套件）。執行：python tools/gen_icons.py"""
+"""產生 NightMarket 圖示：夜空中的燈籠，燈籠上是一組上漲的 K 棒（純 Python，不需要額外套件）。
+執行：python tools/gen_icons.py
+"""
 import math
 import os
 import struct
@@ -6,63 +8,68 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "web", "icons")
-PTS = [(0.17, 0.68), (0.31, 0.54), (0.43, 0.61), (0.57, 0.39), (0.69, 0.47), (0.83, 0.27)]
-C1, C2 = (245, 165, 36), (240, 68, 79)   # 橘 -> 紅
-BG1, BG2 = (30, 35, 50), (14, 16, 22)    # 背景漸層
+
+SKY1, SKY2 = (28, 32, 60), (9, 11, 22)        # 夜空漸層
+GLOW = (255, 120, 40)                         # 燈籠外的暖光
+LIT, RED = (255, 184, 72), (205, 34, 44)      # 燈籠中心亮橘 -> 邊緣紅
+GOLD = (236, 178, 64)
+CREAM = (255, 244, 222)
+CX, CY, RX, RY = 0.5, 0.53, 0.31, 0.28        # 燈籠本體（橢圓）
+# K 棒：(x 中心, 實體上緣, 實體下緣, 影線上緣, 影線下緣)
+CANDLES = [(0.385, 0.565, 0.655, 0.525, 0.690),
+           (0.500, 0.480, 0.590, 0.440, 0.625),
+           (0.615, 0.390, 0.505, 0.350, 0.545)]
 
 
 def lerp(a, b, t):
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+    t = max(0.0, min(1.0, t))
+    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
 
 
-def seg_dist(px, py, ax, ay, bx, by):
-    dx, dy = bx - ax, by - ay
-    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
-    return math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+def pixel(x, y):
+    col = lerp(SKY1, SKY2, y)
+    # 星星
+    for sx, sy, r in ((0.14, 0.16, 0.012), (0.84, 0.12, 0.010), (0.88, 0.40, 0.008), (0.10, 0.52, 0.008)):
+        if math.hypot(x - sx, y - sy) < r:
+            col = lerp(col, (230, 230, 255), 0.85)
+    e = ((x - CX) / RX) ** 2 + ((y - CY) / RY) ** 2
+    if e >= 1:  # 燈籠外的光暈
+        col = lerp(col, GLOW, 0.42 * math.exp(-(math.sqrt(e) - 1) * 4.5))
+    # 吊繩與流蘇
+    if abs(x - CX) < 0.009 and (0.06 < y < 0.21 or 0.87 < y < 0.95):
+        col = GOLD
+    if 0.87 < y < 0.95 and abs(x - CX) < 0.045 * (y - 0.87) / 0.08 + 0.008 and int((x - CX) * 160) % 2 == 0:
+        col = lerp(GOLD, RED, 0.25)
+    # 上下的金色蓋子
+    for y0, y1 in ((0.205, 0.265), (0.795, 0.86)):
+        if y0 < y < y1 and abs(x - CX) < 0.13:
+            col = lerp(GOLD, (150, 96, 26), (y - y0) / (y1 - y0) * 0.6)
+    if e < 1:
+        col = lerp(LIT, RED, math.sqrt(e) ** 1.4)
+        # 燈籠骨架（縱向的弧線）
+        half = RX * math.sqrt(max(1e-9, 1 - ((y - CY) / RY) ** 2))
+        u = (x - CX) / half
+        if any(abs(u - k) < 0.035 for k in (-0.62, 0.62)):
+            col = lerp(col, (120, 14, 24), 0.45)
+        # K 棒
+        for cx, b0, b1, w0, w1 in CANDLES:
+            if (abs(x - cx) < 0.036 and b0 < y < b1) or (abs(x - cx) < 0.008 and w0 < y < w1):
+                col = CREAM
+    return col
 
 
-def line_y(x):
-    for (ax, ay), (bx, by) in zip(PTS, PTS[1:]):
-        if ax <= x <= bx:
-            return ay + (by - ay) * (x - ax) / (bx - ax)
-    return None
-
-
-def render(size, ss=2):
-    n = size * ss
-    px = [[(0, 0, 0)] * n for _ in range(n)]
-    lw = 0.052 / 2
-    for j in range(n):
-        y = (j + 0.5) / n
-        bg = lerp(BG1, BG2, y)
-        for i in range(n):
-            x = (i + 0.5) / n
-            col = bg
-            ly = line_y(x)
-            if ly is not None and ly < y < 0.80:  # 走勢下方的漸層填色
-                a = 0.32 * (1 - (y - ly) / (0.80 - ly + 1e-9))
-                col = lerp(col, lerp(C1, C2, (x - 0.17) / 0.66), a)
-            if 0.79 < y < 0.805 and 0.15 < x < 0.85 and int(x * 40) % 2 == 0:  # 基準虛線
-                col = lerp(col, (120, 128, 145), 0.6)
-            d = min(seg_dist(x, y, *a_, *b_) for a_, b_ in zip(PTS, PTS[1:]))
-            if d < lw:
-                col = lerp(C1, C2, max(0.0, min(1.0, (x - 0.17) / 0.66)))
-            ex, ey = PTS[-1]
-            if math.hypot(x - ex, y - ey) < 0.055:  # 最新價的圓點
-                col = (255, 255, 255) if math.hypot(x - ex, y - ey) < 0.032 else C2
-            px[j][i] = col
-    # 超取樣縮小（抗鋸齒）
+def render(size, ss=3):
     out = []
     for j in range(size):
         row = []
         for i in range(size):
-            r = g = b = 0
+            r = g = b = 0.0
             for dj in range(ss):
                 for di in range(ss):
-                    c = px[j * ss + dj][i * ss + di]
+                    c = pixel((i + (di + 0.5) / ss) / size, (j + (dj + 0.5) / ss) / size)
                     r += c[0]; g += c[1]; b += c[2]
             k = ss * ss
-            row.append((r // k, g // k, b // k))
+            row.append((int(r / k), int(g / k), int(b / k)))
         out.append(row)
     return out
 
