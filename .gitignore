@@ -1,0 +1,14 @@
+# 模擬倉帳戶資料（個人資料，不要上傳）
+paper.json
+paper.json.tmp
+
+# Python
+__pycache__/
+*.pyc
+
+# 編輯器 / 工具
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
