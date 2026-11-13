@@ -42,7 +42,7 @@ const STRAT_TEMPLATES = [
 ];
 const stState = { list: [], cur: null, result: null, chart: null, years: 2, lastEvent: store.get('tw.lastEvent', 0) };
 function newStrategy(tpl = {}) {
-  return JSON.parse(JSON.stringify({ name: tpl.name || '我的策略', mkt: state.mkt, universe: state.watch.slice(0, 5), entry: tpl.entry || { mode: 'all', rules: [] },
+  return JSON.parse(JSON.stringify({ name: (LANG === 'en' && tpl.name ? I18N_EN[tpl.name] : tpl.name) || (LANG === 'en' ? 'My strategy' : '我的策略'), mkt: state.mkt, universe: state.watch.slice(0, 5), entry: tpl.entry || { mode: 'all', rules: [] },
     exit: tpl.exit || { mode: 'any', rules: [] }, stop_loss: tpl.stop_loss ?? 8, take_profit: tpl.take_profit ?? 0, max_hold: 0, size_pct: 100, enabled: false, alert: true, auto_trade: false }));
 }
 PAGES.strategy = {
@@ -54,6 +54,12 @@ PAGES.strategy = {
     if (stState.cur && stState.cur.mkt !== state.mkt) stState.cur = null;
     if (!stState.cur) { const first = stState.list.find((x) => x.mkt === state.mkt); if (first) stState.cur = JSON.parse(JSON.stringify(first)); }
     this.renderEditor();
+    // 網址 #view=strategy&tpl=0&bt=5：直接套用範本並回測（展示用）
+    const hp = new URLSearchParams(location.hash.slice(1));
+    if (hp.get('tpl') && !this.autoRan) {
+      this.autoRan = true; stState.cur = newStrategy(STRAT_TEMPLATES[+hp.get('tpl')] || STRAT_TEMPLATES[0]); stState.years = +hp.get('bt') || 5;
+      this.renderEditor(); this.run();
+    }
   },
   renderList() {
     const mine = stState.list.filter((x) => x.mkt === state.mkt);
@@ -256,14 +262,14 @@ PAGES.heatmap = {
   tick() { if (Date.now() - hmState.t > 30000) this.refresh(); },
   draw() {
     const d = hmState.data[state.mkt], wrap = $('#hmWrap'); if (!d) return;
-    $('#hmSub').textContent = state.mkt === 'tw' ? `市值前 ${d.rows.length} 大（不含 ETF）` : `市值前 ${d.rows.length} 大美股`;
+    $('#hmSub').textContent = LANG === 'en' ? `Top ${d.rows.length} by market cap${state.mkt === 'tw' ? ' (ex-ETF)' : ''}` : state.mkt === 'tw' ? `市值前 ${d.rows.length} 大（不含 ETF）` : `市值前 ${d.rows.length} 大美股`;
     $('#hmUpd').textContent = '更新於 ' + new Date(d.updated * 1000).toTimeString().slice(0, 8);
     $('#hmLegend').innerHTML = [-3, -2, -1, 0, 1, 2, 3].map((p) => `<span style="background:${hmColor(p)}">${p > 0 ? '+' : ''}${p}%</span>`).join('');
     const W = wrap.clientWidth, H = wrap.clientHeight;
     if (W < 50 || H < 50) { if ((this.retry = (this.retry || 0) + 1) < 20) setTimeout(() => this.draw(), 100); return; } // 版面還沒排好就稍後再畫
     this.retry = 0;
     const val = (r) => (hmState.size === 'mcap' ? r.mcap : (r.price || 0) * (r.volume || 0) * (state.mkt === 'tw' ? 1000 : 1)) || 0;
-    const groups = {}; d.rows.forEach((r) => { const v = val(r); if (v > 0) (groups[r.industryZh || r.industry] = groups[r.industryZh || r.industry] || []).push({ ...r, v }); });
+    const groups = {}; d.rows.forEach((r) => { const v = val(r); if (v > 0) { const g = LANG === 'en' && state.mkt === 'us' ? r.industry : (r.industryZh || r.industry); (groups[g] = groups[g] || []).push({ ...r, v }); } });
     const gItems = Object.entries(groups).map(([g, rs]) => ({ g, rs: rs.sort((a, b) => b.v - a.v), v: rs.reduce((s, r) => s + r.v, 0) })).sort((a, b) => b.v - a.v);
     let html = '';
     squarify(gItems, 0, 0, W, H).forEach((G) => {

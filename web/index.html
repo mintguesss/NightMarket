@@ -32,6 +32,7 @@
     <button class="nav-btn m-only" data-act="more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>更多</span></button>
     <div class="nav-spacer"></div>
     <button class="nav-btn" data-act="index"><svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 6-8 3 3"/></svg><span>大盤</span></button>
+    <button class="nav-btn" data-act="lang" title="中文 / English"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg><span id="langLbl">EN</span></button>
     <button class="nav-btn" data-act="alerts"><svg viewBox="0 0 24 24"><path d="M6 9a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8M10 21h4"/></svg><span>提醒</span></button>
     <button class="nav-btn" data-act="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg><span>設定</span></button>
   </nav>
@@ -45,7 +46,7 @@
       <button class="icon-btn" data-collapse="left" title="收合">«</button>
     </div>
     <div class="chips" id="watchTabs"></div>
-    <div class="watch-cols" id="watchCols"><span data-sort="name">名稱代碼</span><span></span><span data-sort="price">成交價</span><span data-sort="pct">漲跌幅</span><span data-sort="chg">漲跌</span></div>
+    <div class="watch-cols" id="watchCols"><span data-sort="name">名稱代碼</span><span class="wc-trend">走勢</span><span data-sort="price">成交價</span><span data-sort="pct">漲跌幅</span><span data-sort="chg">漲跌</span></div>
     <div class="watch-list" id="watchList"></div>
   </aside>
   <div class="resizer" data-resize="left"><button class="rz-btn" data-collapse="left">‹</button></div>
@@ -293,6 +294,7 @@
 <div class="ctx-menu" id="ctxMenu"></div>
 <div class="modal-bg" id="modalBg"><div class="modal" id="modal"></div></div>
 <div class="toast" id="toast"></div>
+<script src="i18n.js"></script>
 <script src="indicators.js"></script>
 <script src="draw.js"></script>
 <script src="app.js"></script>

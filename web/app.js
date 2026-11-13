@@ -83,7 +83,9 @@ const cls = (d) => (d > 0 ? 'up' : d < 0 ? 'down' : 'flat');
 const fmtP = (v, d = 2) => (v == null || isNaN(v) ? '--' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fmtInt = (v) => (v == null || isNaN(v) ? '--' : Math.round(v).toLocaleString('en-US'));
 const sign = (v) => (v > 0 ? '+' : '');
-const fmtVol = (v) => { if (v == null || isNaN(v)) return '--'; const a = Math.abs(v); if (a >= 1e12) return (v / 1e12).toFixed(2) + '兆'; if (a >= 1e8) return (v / 1e8).toFixed(2) + '億'; if (a >= 1e4) return (v / 1e4).toFixed(2) + '萬'; return Math.round(v).toLocaleString(); };
+const fmtVol = (v) => { if (v == null || isNaN(v)) return '--'; const a = Math.abs(v);
+  if (LANG === 'en') return a >= 1e12 ? (v / 1e12).toFixed(2) + 'T' : a >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : a >= 1e4 ? (v / 1e3).toFixed(1) + 'K' : Math.round(v).toLocaleString();
+  if (a >= 1e12) return (v / 1e12).toFixed(2) + '兆'; if (a >= 1e8) return (v / 1e8).toFixed(2) + '億'; if (a >= 1e4) return (v / 1e4).toFixed(2) + '萬'; return Math.round(v).toLocaleString(); };
 const isUS = (c) => c.startsWith('US.');
 const isTW = (c) => !c.includes('.') && c !== 't00' && c !== 'o00';
 const isEtf = (c) => /^00/.test(c) || ['US.QQQ', 'US.SPY', 'US.VOO', 'US.SOXX', 'US.SMH', 'US.DIA', 'US.IWM', 'US.TQQQ', 'US.SOXL'].includes(c);
@@ -173,7 +175,7 @@ const chartOpts = (showTime) => ({
   rightPriceScale: { borderColor: '#262b38', minimumWidth: 72 },
   timeScale: { borderColor: '#262b38', visible: showTime, timeVisible: true, secondsVisible: false, rightOffset: 4 },
   crosshair: { mode: 0, vertLine: { color: '#555c6b', labelBackgroundColor: '#2a3040' }, horzLine: { color: '#555c6b', labelBackgroundColor: '#2a3040' } },
-  localization: { locale: 'zh-TW', dateFormat: 'yyyy/MM/dd' },
+  localization: { locale: LANG === 'en' ? 'en-US' : 'zh-TW', dateFormat: 'yyyy/MM/dd' },
   handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false }, // 手機上下滑動捲頁面
   autoSize: true,
 });
@@ -793,16 +795,18 @@ $('#nav').addEventListener('click', (e) => {
   if (b.dataset.act === 'alerts') alertsPanel();
   if (b.dataset.act === 'index') { selectCode(MKT_INDEX[state.mkt]); setView('chart'); }
   if (b.dataset.act === 'settings') settingsPanel();
+  if (b.dataset.act === 'lang') setLang(LANG === 'en' ? 'zh' : 'en');
 });
 function settingsPanel() {
   const S = state.settings;
   openModal('設定', `<div class="fld"><label>漲跌顏色</label><select id="stColor"><option value="redUp" ${S.colorMode === 'redUp' ? 'selected' : ''}>紅漲綠跌（台灣習慣）</option><option value="greenUp" ${S.colorMode === 'greenUp' ? 'selected' : ''}>綠漲紅跌（歐美習慣）</option></select></div>
     <div class="fld"><label>盤中更新頻率</label><select id="stRef">${[5, 10, 30].map((s) => `<option value="${s}" ${S.refresh === s ? 'selected' : ''}>每 ${s} 秒</option>`).join('')}</select></div>
+    <div class="fld"><label>語言 Language</label><select id="stLang"><option value="zh" ${LANG === 'zh' ? 'selected' : ''}>繁體中文</option><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option></select></div>
     <div class="fld"><label>推播通知</label><button class="btn sec" id="stNotify">設定 Telegram／Discord／ntfy</button></div>
     <div class="fld"><label>版面</label><button class="btn sec" id="stLayout">重設左右欄寬度</button></div>
     <div class="fld"><label>資料</label><button class="btn sec" id="stExport">匯出設定與自選</button><button class="btn sec" id="stImport">匯入</button></div>
     <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
-    [{ label: '取消' }, { label: '儲存', act: (m) => { S.colorMode = m.querySelector('#stColor').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
+    [{ label: '取消' }, { label: '儲存', act: (m) => { const lang = m.querySelector('#stLang').value; if (lang !== LANG) { setLang(lang); return; } S.colorMode = m.querySelector('#stColor').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
   $('#stNotify').onclick = () => { closeModal(); notifyPanel(); };
   $('#stLayout').onclick = () => { state.layout = { lw: 380, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
   $('#stExport').onclick = () => {
@@ -988,11 +992,18 @@ $$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', () => { el.
 
 function appInit() {
   renderMktSwitch();
+  $('#langLbl').textContent = LANG === 'en' ? '中文' : 'EN';
   applyLayout(); syncToolbar(); renderIndBars(); renderDrawBar(); renderWatchTabs();
   draw.setItems(store.get('tw.draw.' + state.code, []));
   renderWatch(); renderSide(); renderFoot();
   refreshQuotes(); loadKline(); refreshSparks(); loadPaper();
   api('/api/list').then((l) => { state.list = l; l.forEach((s) => (state.listMap[s.code] = s)); renderWatch(); renderSide(); refreshQuotes(); }).catch(() => {});
+  // 網址參數：#view=heatmap&mkt=us&code=2330（方便分享與截圖）
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.get('mkt') && hp.get('mkt') !== state.mkt) switchMarket(hp.get('mkt'));
+  if (hp.get('code')) selectCode(hp.get('code'));
+  if (hp.get('period') && PERIODS[hp.get('period')]) setPeriod(hp.get('period'));
+  if (hp.get('view')) setTimeout(() => setView(hp.get('view')), 300);
   let sec = 0;
   setInterval(() => {
     sec += 5; const open = (state.mkt === 'tw' ? twOpen() : usActive()), every = state.settings.refresh || 5;

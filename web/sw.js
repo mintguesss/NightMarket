@@ -1,8 +1,8 @@
 /* Service worker：讓手機可以「加入主畫面」。
    網頁檔案一律先連網路取最新版，連不上才用快取（避免更新後還看到舊版）；/api/ 行情資料不快取。 */
-const CACHE = 'tw-us-viewer-v1';
+const CACHE = 'tw-us-viewer-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'pages.js', 'panels.js', 'indicators.js', 'draw.js', 'mobile.js',
-  'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
+  'features.js', 'i18n.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));

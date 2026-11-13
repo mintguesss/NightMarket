@@ -48,6 +48,7 @@
         'sep',
         { label: '價格提醒', icon: '🔔', act: alertsPanel },
         { label: '設定', icon: '⚙', act: settingsPanel },
+        { label: LANG === 'en' ? '中文' : 'English', icon: '🌐', act: () => setLang(LANG === 'en' ? 'zh' : 'en') },
       ]);
     }
   }, true);
