@@ -8,6 +8,9 @@
     document.body.classList.toggle('mobile', isMobile());
     if (!isMobile()) { delete document.body.dataset.mpage; const b = document.querySelector('#nav [data-view="chart"] span'); if (b) b.textContent = '看盤'; return; }
     document.body.dataset.mpage = state.view === 'chart' ? (detail ? 'detail' : 'list') : 'view';
+    // 頂部標題：清單頁「自選」、個股頁顯示股名、功能頁顯示頁名
+    const mp = document.body.dataset.mpage;
+    $('#mTitle').textContent = mp === 'list' ? '自選' : mp === 'detail' ? nameOf(state.code) : (document.querySelector(`#nav [data-view="${state.view}"] span`)?.textContent || '');
     const btn = document.querySelector('#nav [data-view="chart"] span'); if (btn) btn.textContent = '自選';
     setTimeout(() => { // 圖表在隱藏時寬度為 0，顯示後重新調整範圍
       draw.resize();
@@ -80,6 +83,14 @@
     if (a === 'settings') settingsPanel();
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+  // 搜尋：平常只顯示放大鏡，點了才展開搜尋框
+  const openSearch = () => { document.body.classList.add('search-open'); setTimeout(() => $('#searchInput').focus(), 30); };
+  const closeSearch = () => { document.body.classList.remove('search-open'); $('#searchInput').value = ''; $('#searchDrop').classList.remove('open'); $('#searchInput').blur(); };
+  $('#mSearchBtn').addEventListener('click', openSearch);
+  $('#mSearchCancel').addEventListener('click', closeSearch);
+  $('#searchDrop').addEventListener('click', () => setTimeout(closeSearch, 50));
+  $('#searchInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') setTimeout(closeSearch, 80); if (e.key === 'Escape') closeSearch(); });
 
   // 返回鍵
   $('#mBack').addEventListener('click', () => {

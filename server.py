@@ -514,6 +514,9 @@ def us_search(q):
     url = ("https://query1.finance.yahoo.com/v1/finance/search?quotesCount=10&newsCount=0&q="
            + urllib.parse.quote(q))
     d = cached("search:" + q.lower(), 300, lambda: fetch_json(url))
+    if not d.get("quotes"):  # Yahoo 偶爾回空結果（限流），不要快取 5 分鐘
+        with _cache_lock:
+            _cache.pop("search:" + q.lower(), None)
     out = []
     for r in d.get("quotes", []):
         if r.get("quoteType") in ("EQUITY", "ETF") and r.get("exchange") in US_EX:

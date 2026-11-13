@@ -566,7 +566,7 @@ function renderWatch() {
   el.innerHTML = codes.map((c) => {
     const q = state.quotes[c], { d, pct } = chgOf(q), k = cls(d), al = state.alerts[c];
     const x = S.showExt && q?.ext && q.price ? q.ext : null, xd = x ? x.price - q.price : 0, xk = cls(xd);
-    const pctTxt = q ? (S.pctBox || document.body.classList.contains('mobile') ?`<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--';
+    const pctTxt = q ? (S.pctBox ? `<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--';
     return `<div class="wrow ${c === state.code ? 'active' : ''} ${state.stars.includes(c) ? 'star' : ''} ${state.pinned.includes(c) ? 'pinned' : ''}" data-code="${esc(c)}">
       <div class="wname"><b>${esc(nameOf(c))}</b><small>${esc(showCode(c))}${al && (al.above || al.below || al.pctUp || al.pctDown) ? '<span class="walert">🔔</span>' : ''}</small>${state.notes[c] ? `<span class="wnote">${esc(state.notes[c])}</span>` : ''}</div>
       ${S.spark ? '<canvas></canvas>' : '<span></span>'}
@@ -574,7 +574,8 @@ function renderWatch() {
       <span class="num wc ${k}">${pctTxt}${x ? `<small class="${xk}">${sign(xd)}${((xd / q.price) * 100).toFixed(2)}%<em>${esc(x.label)}</em></small>` : ''}</span>
       <span class="num ${k}">${q ? sign(d) + fmtP(d) : '--'}</span></div>`;
   }).join('');
-  if (S.spark) el.querySelectorAll('.wrow').forEach((r) => drawSpark(r.querySelector("canvas"), state.sparks[r.dataset.code], 58, 26, r.dataset.code));
+  // 小走勢依畫布實際大小繪製（手機版放大）
+  if (S.spark) el.querySelectorAll('.wrow').forEach((r) => { const cv = r.querySelector('canvas'); drawSpark(cv, state.sparks[r.dataset.code], cv.clientWidth || 58, cv.clientHeight || 26, r.dataset.code); });
 }
 $('#watchList').addEventListener('click', (e) => { const r = e.target.closest('.wrow'); if (r) selectCode(r.dataset.code); });
 ['#paneMain', '#paneSub1', '#paneSub2'].forEach((s) => $(s).addEventListener('contextmenu', (e) => {
