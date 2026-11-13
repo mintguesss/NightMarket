@@ -1,6 +1,10 @@
 # 模擬倉帳戶資料（個人資料，不要上傳）
 paper.json
 paper.json.tmp
+config.json
+strategies.json
+strategy_events.json
+*.tmp
 
 # Python
 __pycache__/

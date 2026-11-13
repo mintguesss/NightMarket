@@ -38,6 +38,9 @@
       e.stopPropagation();
       const r = b.getBoundingClientRect();
       openMenu(r.left - 120, r.top - 250, [
+        { label: '熱力圖', icon: '▤', act: () => setView('heatmap') },
+        { label: '選股', icon: '⚲', act: () => setView('screener') },
+        { label: '策略與回測', icon: '↗', act: () => setView('strategy') },
         { label: '期權', icon: '▦', act: () => setView('options') },
         { label: '資訊（新聞、財報）', icon: '◉', act: () => setView('news') },
         { label: '日曆', icon: '▣', act: () => setView('calendar') },

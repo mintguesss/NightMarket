@@ -616,6 +616,7 @@ function checkAlerts() {
       state.alertLog.unshift({ time: Date.now(), code, msg }); state.alertLog = state.alertLog.slice(0, 100);
       toast('🔔 ' + msg, 6000); beep();
       if ('Notification' in window && Notification.permission === 'granted') new Notification('股價提醒', { body: msg });
+      post('/api/notify/send', { title: '股價提醒', text: msg }).catch(() => {});
     }
   }
   if (changed) { save('alerts'); save('alertLog'); renderWatch(); }
@@ -780,10 +781,11 @@ const PAGES = {}; // pages.js 註冊：{ load(), render?(), tick?() }
 function setView(v) {
   state.view = v;
   $$('#nav [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
-  ['Chart', 'Market', 'Rank', 'Options', 'News', 'Calendar', 'Paper'].forEach((n) => ($('#view' + n).hidden = n.toLowerCase() !== v));
-  $('#app').classList.toggle('full-view', v === 'calendar'); // 日曆頁全寬
+  ['Chart', 'Market', 'Rank', 'Options', 'News', 'Calendar', 'Paper', 'Heatmap', 'Screener', 'Strategy', 'Multi'].forEach((n) => ($('#view' + n).hidden = n.toLowerCase() !== v));
+  $('#app').classList.toggle('full-view', ['calendar', 'heatmap', 'screener', 'strategy', 'multi'].includes(v)); // 這些頁面全寬
   setTimeout(() => draw.resize(), 60);
   if (v === 'chart') { draw.resize(); } else PAGES[v]?.load();
+  if (v !== 'multi') PAGES.multi?.leave?.();
 }
 $('#nav').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
@@ -796,10 +798,12 @@ function settingsPanel() {
   const S = state.settings;
   openModal('設定', `<div class="fld"><label>漲跌顏色</label><select id="stColor"><option value="redUp" ${S.colorMode === 'redUp' ? 'selected' : ''}>紅漲綠跌（台灣習慣）</option><option value="greenUp" ${S.colorMode === 'greenUp' ? 'selected' : ''}>綠漲紅跌（歐美習慣）</option></select></div>
     <div class="fld"><label>盤中更新頻率</label><select id="stRef">${[5, 10, 30].map((s) => `<option value="${s}" ${S.refresh === s ? 'selected' : ''}>每 ${s} 秒</option>`).join('')}</select></div>
+    <div class="fld"><label>推播通知</label><button class="btn sec" id="stNotify">設定 Telegram／Discord／ntfy</button></div>
     <div class="fld"><label>版面</label><button class="btn sec" id="stLayout">重設左右欄寬度</button></div>
     <div class="fld"><label>資料</label><button class="btn sec" id="stExport">匯出設定與自選</button><button class="btn sec" id="stImport">匯入</button></div>
     <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
     [{ label: '取消' }, { label: '儲存', act: (m) => { S.colorMode = m.querySelector('#stColor').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
+  $('#stNotify').onclick = () => { closeModal(); notifyPanel(); };
   $('#stLayout').onclick = () => { state.layout = { lw: 380, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
   $('#stExport').onclick = () => {
     const data = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('tw.')) data[k] = localStorage.getItem(k); }

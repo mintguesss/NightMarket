@@ -3,7 +3,7 @@
 # 執行：docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=你的密碼 -v tw-us-data:/data tw-us-viewer
 FROM python:3.12-slim
 WORKDIR /app
-COPY server.py ./
+COPY server.py strategy.py ./
 COPY web ./web
 ENV HOST=0.0.0.0 PORT=8765 TWSTOCK_DATA=/data PYTHONUNBUFFERED=1
 VOLUME /data

@@ -8,7 +8,7 @@ py -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name TWUSStockViewer ^
   --icon web\icons\app.ico ^
   --add-data "web;web" ^
-  --hidden-import server ^
+  --hidden-import server --hidden-import strategy ^
   launcher.pyw
 echo.
 echo 完成：dist\TWUSStockViewer.exe （模擬倉資料存在 %%LOCALAPPDATA%%\TWUSStockViewer）

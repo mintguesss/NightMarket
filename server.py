@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import uuid
+import strategy as S
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -1231,6 +1232,389 @@ def cal_week(start, mkt):
     return {"start": start, "days": days, "events": out}
 
 
+
+# ---------------- 設定檔、推播 ----------------
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+STRAT_FILE = os.path.join(DATA_DIR, "strategies.json")
+EVENT_FILE = os.path.join(DATA_DIR, "strategy_events.json")
+_store_lock = threading.RLock()
+
+
+def _jload(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def _jsave(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def config_get():
+    return _jload(CONFIG_FILE, {"notify": {}})
+
+
+def config_public():
+    """回傳給前端時把 token 遮起來。"""
+    c = config_get().get("notify", {})
+    def mask(v):
+        return (v[:4] + "…" + v[-4:]) if isinstance(v, str) and len(v) > 10 else ("已設定" if v else "")
+    return {"telegram": {"enabled": bool(c.get("telegram", {}).get("enabled")), "token": mask(c.get("telegram", {}).get("token")), "chat_id": c.get("telegram", {}).get("chat_id", "")},
+            "discord": {"enabled": bool(c.get("discord", {}).get("enabled")), "webhook": mask(c.get("discord", {}).get("webhook"))},
+            "ntfy": {"enabled": bool(c.get("ntfy", {}).get("enabled")), "topic": c.get("ntfy", {}).get("topic", ""), "server": c.get("ntfy", {}).get("server", "https://ntfy.sh")}}
+
+
+def config_set_notify(body):
+    with _store_lock:
+        cfg = config_get()
+        n = cfg.setdefault("notify", {})
+        for ch, keys in (("telegram", ("token", "chat_id")), ("discord", ("webhook",)), ("ntfy", ("topic", "server"))):
+            if ch in body:
+                cur = n.setdefault(ch, {})
+                cur["enabled"] = bool(body[ch].get("enabled"))
+                for k in keys:
+                    v = body[ch].get(k)
+                    if v is not None and "…" not in str(v) and v != "已設定":  # 遮罩值代表沒改
+                        cur[k] = str(v).strip()
+        _jsave(CONFIG_FILE, cfg)
+    return {"ok": True, "msg": "推播設定已儲存"}
+
+
+def _post(url, data, headers=None, form=False):
+    body = (urllib.parse.urlencode(data).encode() if form else
+            data.encode("utf-8") if isinstance(data, str) else json.dumps(data).encode("utf-8"))
+    h = {"User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" if form else
+         ("text/plain; charset=utf-8" if isinstance(data, str) else "application/json")}
+    h.update(headers or {})
+    with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=h), timeout=10, context=SSL_CTX) as r:
+        return r.status
+
+
+def push(title, text, only=None):
+    """送到所有已啟用的推播管道。回傳每個管道的結果。"""
+    n = config_get().get("notify", {})
+    res = {}
+    t = n.get("telegram", {})
+    if t.get("enabled") and t.get("token") and t.get("chat_id") and (not only or only == "telegram"):
+        try:
+            _post(f"https://api.telegram.org/bot{t['token']}/sendMessage", {"chat_id": t["chat_id"], "text": f"{title}\n{text}"}, form=True)
+            res["telegram"] = "ok"
+        except Exception as e:
+            res["telegram"] = f"失敗：{e}"
+    d = n.get("discord", {})
+    if d.get("enabled") and d.get("webhook") and (not only or only == "discord"):
+        try:
+            _post(d["webhook"], {"content": f"**{title}**\n{text}"})
+            res["discord"] = "ok"
+        except Exception as e:
+            res["discord"] = f"失敗：{e}"
+    f = n.get("ntfy", {})
+    if f.get("enabled") and f.get("topic") and (not only or only == "ntfy"):
+        try:
+            server_ = (f.get("server") or "https://ntfy.sh").rstrip("/")
+            _post(f"{server_}/{urllib.parse.quote(f['topic'])}", text, headers={"Title": urllib.parse.quote(title), "Tags": "chart_with_upwards_trend"})
+            res["ntfy"] = "ok"
+        except Exception as e:
+            res["ntfy"] = f"失敗：{e}"
+    return res
+
+
+# ---------------- 策略：存取、回測、監控 ----------------
+def strategies_get():
+    return _jload(STRAT_FILE, [])
+
+
+def strategies_save(lst):
+    with _store_lock:
+        _jsave(STRAT_FILE, lst)
+
+
+def strategy_upsert(st):
+    st = dict(st)
+    st.setdefault("id", uuid.uuid4().hex[:10])
+    st["updated"] = int(time.time())
+    with _store_lock:
+        lst = [x for x in strategies_get() if x.get("id") != st["id"]]
+        lst.insert(0, st)
+        strategies_save(lst)
+    return {"ok": True, "strategy": st}
+
+
+def strategy_delete(sid):
+    with _store_lock:
+        strategies_save([x for x in strategies_get() if x.get("id") != sid])
+    return {"ok": True}
+
+
+def _daily(code, years=2):
+    rng = {1: "1y", 2: "2y", 3: "5y", 5: "5y", 10: "10y"}.get(int(years), "2y")
+    return (kline(code, "1d", rng) or {}).get("bars") or []
+
+
+def run_backtest(body):
+    st = body.get("strategy") or {}
+    codes = [c for c in (st.get("universe") or []) if c][:20]
+    if not codes:
+        return {"error": "請至少選一檔股票"}
+    if not (st.get("entry") or {}).get("rules"):
+        return {"error": "請設定進場條件"}
+    years = int(body.get("years") or 2)
+    capital = float(body.get("capital") or (10_000_000 if st.get("mkt") == "tw" else 30_000))
+    data = {}
+    for code, bars in zip(codes, POOL.map(lambda c: _safe(lambda x: _daily(x, years), c, []), codes)):
+        if years in (3,) and bars:  # 5y 資料截成 3 年
+            cut = bars[-1]["t"] - 3 * 365 * 86400
+            bars = [b for b in bars if b["t"] >= cut]
+        if len(bars) > 30:
+            data[code] = bars
+    if not data:
+        return {"error": "抓不到歷史資料"}
+    r = S.backtest(st, data, capital)
+    r["names"] = {c: (stock_list().get(c) or {}).get("name") or c for c in data}
+    return r
+
+
+def events_get(since=0):
+    return [e for e in _jload(EVENT_FILE, []) if e.get("t", 0) > since][:100]
+
+
+def _event_add(ev):
+    with _store_lock:
+        lst = _jload(EVENT_FILE, [])
+        lst.insert(0, ev)
+        _jsave(EVENT_FILE, lst[:300])
+
+
+_fired = {}  # (sid, code, kind, date) 一天只觸發一次
+
+
+def _live_bars(code):
+    bars = [dict(b) for b in _daily(code, 1)]
+    q = quotes([code]).get(code)
+    if not bars or not q or not q.get("price"):
+        return bars, q
+    last = bars[-1]
+    off = 8 * 3600 if is_tw(code) else -5 * 3600
+    qdate = (q.get("date") or "")
+    ldate = datetime.fromtimestamp(last["t"] + off, timezone.utc).strftime("%Y%m%d")
+    vol = (q.get("volume") or 0) * (1000 if is_tw(code) else 1)
+    if qdate and qdate > ldate:  # 今天的K棒還沒進日K：用即時報價補一根
+        bars.append({"t": last["t"] + 86400, "o": q.get("open") or q["price"], "h": q.get("high") or q["price"],
+                     "l": q.get("low") or q["price"], "c": q["price"], "v": vol})
+    else:
+        last.update(c=q["price"], h=max(last["h"], q.get("high") or q["price"]), l=min(last["l"], q.get("low") or q["price"]), v=max(last["v"], vol))
+    return bars, q
+
+
+def _market_open(mkt):
+    if mkt == "tw":
+        return tw_open()
+    q = _safe(yahoo_quote, "US.^GSPC", None)
+    return bool(q and q.get("session") == "REGULAR")
+
+
+def check_strategies(force=False):
+    """檢查所有啟用中的策略；force=True 時不管是否開盤（手動「立即檢查」）。"""
+    out = []
+    for st in strategies_get():
+        if not st.get("enabled") or not (st.get("alert") or st.get("auto_trade")):
+            continue
+        mkt = st.get("mkt", "tw")
+        if not force and not _market_open(mkt):
+            continue
+        codes = (st.get("universe") or [])[:30]
+        for code in codes:
+            try:
+                bars, q = _live_bars(code)
+            except Exception as e:
+                print("strategy data error:", code, e, file=sys.stderr)
+                continue
+            if len(bars) < 30:
+                continue
+            day = datetime.now(TW).strftime("%Y%m%d")
+            acc = paper_load()
+            pos = acc["positions"].get(code)
+            checks = [("exit", st.get("exit"))] if (st.get("auto_trade") and pos) else [("entry", st.get("entry"))]
+            if st.get("alert") and not st.get("auto_trade") and (st.get("exit") or {}).get("rules"):
+                checks = [("entry", st.get("entry")), ("exit", st.get("exit"))]
+            for kind, grp in checks:
+                if not (grp or {}).get("rules") or not S.signal_now(bars, grp):
+                    continue
+                key = (st["id"], code, kind, day)
+                if key in _fired:
+                    continue
+                _fired[key] = True
+                name = (q or {}).get("name") or code
+                price = bars[-1]["c"]
+                ev = {"t": int(time.time()), "sid": st["id"], "strategy": st.get("name"), "code": code, "name": name,
+                      "kind": kind, "price": price, "detail": S.explain(grp, bars)}
+                trade_msg = ""
+                if st.get("auto_trade"):
+                    ccy = ccy_of(code)
+                    if kind == "entry" and not pos:
+                        budget = acc["cash"][ccy] * float(st.get("size_pct") or 100) / 100 / max(1, len(codes))
+                        lots = int(budget / (price * 1000)) if is_tw(code) else 0
+                        qty = lots * 1000 if lots >= 1 else int(budget / price)  # 台股夠一張就買整張，不夠買零股
+                        if qty > 0:
+                            r = paper_order({"code": code, "side": "buy", "type": "market", "qty": qty})
+                            trade_msg = f"模擬買進 {qty} 股：{r.get('msg')}"
+                    elif kind == "exit" and pos:
+                        r = paper_order({"code": code, "side": "sell", "type": "market", "qty": pos["qty"]})
+                        trade_msg = f"模擬賣出 {pos['qty']} 股：{r.get('msg')}"
+                ev["trade"] = trade_msg
+                _event_add(ev)
+                if st.get("alert"):
+                    cond = "；".join(d["text"] for d in ev["detail"])
+                    push(f"策略「{st.get('name')}」{'進場' if kind == 'entry' else '出場'}訊號",
+                         f"{name}（{code.replace('US.', '')}）價格 {price}\n條件：{cond}" + (f"\n{trade_msg}" if trade_msg else ""))
+                out.append(ev)
+    return out
+
+
+def strategy_monitor():
+    while True:
+        time.sleep(60)
+        try:
+            check_strategies()
+        except Exception as e:
+            print("strategy monitor error:", e, file=sys.stderr)
+
+
+# ---------------- 市場快照（選股、熱力圖） ----------------
+TW_INDUSTRY = {"01": "水泥", "02": "食品", "03": "塑膠", "04": "紡織纖維", "05": "電機機械", "06": "電器電纜", "08": "玻璃陶瓷", "09": "造紙",
+               "10": "鋼鐵", "11": "橡膠", "12": "汽車", "14": "建材營造", "15": "航運", "16": "觀光餐旅", "17": "金融保險", "18": "貿易百貨",
+               "20": "其他", "21": "化學", "22": "生技醫療", "23": "油電燃氣", "24": "半導體", "25": "電腦週邊", "26": "光電", "27": "通信網路",
+               "28": "電子零組件", "29": "電子通路", "30": "資訊服務", "31": "其他電子", "32": "文化創意", "33": "農業科技", "34": "電子商務",
+               "35": "綠能環保", "36": "數位雲端", "37": "運動休閒", "38": "居家生活", "80": "管理股票", "91": "存託憑證"}
+
+
+def tw_snapshot():
+    def load():
+        rows = {}
+        for r in _safe(lambda u: _open_data(u, 1800), "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL", []):
+            c = r.get("Code", "")
+            if STOCK_RE.match(c):
+                rows[c] = {"code": c, "name": r.get("Name"), "mkt": "tse", "price": _num(r.get("ClosingPrice")),
+                           "chg": _num(r.get("Change")), "volume": (_num(r.get("TradeVolume")) or 0) / 1000}
+        for r in _safe(lambda u: _open_data(u, 1800), "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", []):
+            c = r.get("SecuritiesCompanyCode", "")
+            if STOCK_RE.match(c):
+                rows[c] = {"code": c, "name": r.get("CompanyName"), "mkt": "otc", "price": _num(r.get("Close")),
+                           "chg": _num(str(r.get("Change") or "").strip()), "volume": (_num(r.get("TradingShares")) or 0) / 1000}
+        for r in _safe(_open_data, "https://openapi.twse.com.tw/v1/exchangeReport/BWIBBU_ALL", []):
+            x = rows.get(r.get("Code"))
+            if x:
+                x.update(pe=_num(r.get("PEratio")), yld=_num(r.get("DividendYield")), pb=_num(r.get("PBratio")))
+        for r in _safe(_open_data, "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis", []):
+            x = rows.get(r.get("SecuritiesCompanyCode"))
+            if x:
+                x.update(pe=_num(r.get("PriceEarningRatio")), yld=_num(r.get("YieldRatio")), pb=_num(r.get("PriceBookRatio")))
+        for r in _safe(_open_data, "https://openapi.twse.com.tw/v1/opendata/t187ap03_L", []):
+            x = rows.get(str(r.get("公司代號")).strip())
+            if x:
+                x.update(industry=TW_INDUSTRY.get(r.get("產業別"), "其他"), shares=_num(r.get("已發行普通股數或TDR原股發行股數")))
+        for r in _safe(_open_data, "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap03_O", []):
+            x = rows.get(str(r.get("SecuritiesCompanyCode")).strip())
+            if x:
+                x.update(industry=TW_INDUSTRY.get(r.get("SecuritiesIndustryCode"), "其他"), shares=_num(r.get("IssueShares")))
+        for x in rows.values():
+            if x["code"].startswith("00"):
+                x["industry"] = "ETF"
+            x.setdefault("industry", "其他")
+            p, c = x.get("price"), x.get("chg")
+            x["pct"] = c / (p - c) * 100 if p and c is not None and p - c else 0
+            x["mcap"] = (x.get("shares") or 0) * (p or 0)
+        return list(rows.values())
+    return cached("twsnap", 1800, load)
+
+
+def us_snapshot():
+    def load():
+        d = fetch_json("https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&offset=0&download=true", 30)
+        out = []
+        for r in (d.get("data") or {}).get("rows") or []:
+            sym = r.get("symbol", "")
+            if not sym or "^" in sym or "/" in sym:
+                continue
+            mcap = _num(r.get("marketCap")) or 0
+            out.append({"code": "US." + sym.strip(), "name": r.get("name"), "mkt": "us", "price": _num(str(r.get("lastsale", "")).replace("$", "")),
+                        "chg": _num(r.get("netchange")), "pct": _num(str(r.get("pctchange", "")).replace("%", "")) or 0,
+                        "volume": _num(r.get("volume")) or 0, "mcap": mcap, "industry": r.get("sector") or "Other", "sub": r.get("industry")})
+        return out
+    return cached("ussnap", 120, load)
+
+
+US_SECTOR_ZH = {"Technology": "科技", "Health Care": "醫療保健", "Finance": "金融", "Consumer Discretionary": "非必需消費", "Industrials": "工業",
+                "Energy": "能源", "Utilities": "公用事業", "Real Estate": "房地產", "Basic Materials": "原物料", "Consumer Staples": "必需消費",
+                "Telecommunications": "通訊", "Miscellaneous": "其他", "Other": "其他"}
+
+
+def heatmap(mkt):
+    if mkt == "us":
+        rows = sorted((r for r in us_snapshot() if r["mcap"] > 0), key=lambda r: -r["mcap"])[:300]
+        for r in rows:
+            r["industryZh"] = US_SECTOR_ZH.get(r["industry"], r["industry"])
+        return {"mkt": "us", "rows": rows, "live": True, "updated": int(time.time())}
+    rows = sorted((r for r in tw_snapshot() if r.get("mcap") and r["industry"] not in ("ETF", "存託憑證")), key=lambda r: -r["mcap"])[:250]
+    rows = [dict(r) for r in rows]
+
+    def live():
+        return quotes([r["code"] for r in rows])
+    qs = cached("hm:twq", 30, live)
+    for r in rows:
+        q = qs.get(r["code"])
+        if q and q.get("price") and q.get("prev"):
+            r["price"], r["pct"] = q["price"], (q["price"] - q["prev"]) / q["prev"] * 100
+            r["mcap"] = (r.get("shares") or 0) * q["price"]
+        r["industryZh"] = r["industry"]
+    return {"mkt": "tw", "rows": rows, "live": bool(qs), "updated": int(time.time())}
+
+
+def screener(body):
+    mkt = body.get("mkt", "tw")
+    f = body.get("filters") or {}
+    rows = us_snapshot() if mkt == "us" else tw_snapshot()
+
+    def ok(r):
+        def rng(key, lo, hi):
+            v = r.get(key)
+            if f.get(lo) not in (None, "") and (v is None or v < float(f[lo])):
+                return False
+            if f.get(hi) not in (None, "") and (v is None or v > float(f[hi])):
+                return False
+            return True
+        if not (rng("price", "price_min", "price_max") and rng("pct", "pct_min", "pct_max") and rng("volume", "vol_min", "vol_max")
+                and rng("pe", "pe_min", "pe_max") and rng("yld", "yld_min", "yld_max") and rng("pb", "pb_min", "pb_max")):
+            return False
+        if f.get("mcap_min") not in (None, "") and (r.get("mcap") or 0) < float(f["mcap_min"]) * (1e8 if mkt == "tw" else 1e9):
+            return False
+        if f.get("industries") and r.get("industry") not in f["industries"]:
+            return False
+        if f.get("no_etf") and (r.get("industry") == "ETF"):
+            return False
+        return True
+    cand = [r for r in rows if ok(r)]
+    sort = body.get("sort") or "volume"
+    cand.sort(key=lambda r: -(r.get(sort) or 0))
+    tech = body.get("tech") or {}
+    total = len(cand)
+    if not (tech.get("rules")):
+        return {"rows": cand[:300], "total": total, "scanned": 0}
+    limit = min(int(body.get("limit") or 80), 150)
+    pool = cand[:limit]
+    results = []
+    for r, bars in zip(pool, POOL.map(lambda c: _safe(lambda x: _daily(x, 1), c["code"], []), pool)):
+        if len(bars) > 30 and S.signal_now(bars, tech):
+            results.append(dict(r, detail=S.explain(tech, bars)))
+    return {"rows": results, "total": total, "scanned": len(pool)}
+
+
 # ---------------- HTTP ----------------
 class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".webmanifest": "application/manifest+json",
@@ -1320,6 +1704,16 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(tw_options(q.get("exp")) if und == "TXO" else us_options(und, q.get("exp")))
             elif u.path == "/api/futures":
                 self.send_json(tw_futures())
+            elif u.path == "/api/strategies":
+                self.send_json(strategies_get())
+            elif u.path == "/api/strategy/events":
+                self.send_json(events_get(int(q.get("since") or 0)))
+            elif u.path == "/api/strategy/operands":
+                self.send_json({"operands": S.OPERANDS, "ops": S.OPS})
+            elif u.path == "/api/config/notify":
+                self.send_json(config_public())
+            elif u.path == "/api/heatmap":
+                self.send_json(heatmap(q.get("mkt", "tw")))
             elif u.path == "/api/calweek":
                 self.send_json(cal_week(q["start"], q.get("mkt", "tw")))
             elif u.path == "/api/info":
@@ -1343,7 +1737,24 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}")
-            if u.path == "/api/paper/order":
+            if u.path == "/api/strategies":
+                self.send_json(strategy_upsert(body))
+            elif u.path == "/api/strategies/delete":
+                self.send_json(strategy_delete(body.get("id")))
+            elif u.path == "/api/backtest":
+                self.send_json(run_backtest(body))
+            elif u.path == "/api/strategy/check":
+                self.send_json({"events": check_strategies(force=True)})
+            elif u.path == "/api/screener":
+                self.send_json(screener(body))
+            elif u.path == "/api/config/notify":
+                self.send_json(config_set_notify(body))
+            elif u.path == "/api/notify/test":
+                r = push("測試推播", "台美股看盤：推播設定成功 ✅", only=body.get("channel"))
+                self.send_json({"ok": bool(r) and all(v == "ok" for v in r.values()), "result": r or {"-": "沒有啟用中的管道"}})
+            elif u.path == "/api/notify/send":
+                self.send_json({"result": push(body.get("title") or "提醒", body.get("text") or "")})
+            elif u.path == "/api/paper/order":
                 self.send_json(paper_order(body))
             elif u.path == "/api/paper/cancel":
                 self.send_json(paper_cancel(body.get("id")))
@@ -1362,6 +1773,7 @@ def start(port=PORT, host=None):
     os.makedirs(DATA_DIR, exist_ok=True)
     threading.Thread(target=stock_list, daemon=True).start()
     threading.Thread(target=paper_matcher, daemon=True).start()
+    threading.Thread(target=strategy_monitor, daemon=True).start()
     srv = ThreadingHTTPServer((host or HOST, port), Handler)
     return srv
 

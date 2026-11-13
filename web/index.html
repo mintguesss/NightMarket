@@ -21,7 +21,10 @@
     <button class="mkt-btn" id="mktSwitch" data-mkt-toggle></button>
     <button class="nav-btn active" data-view="chart"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span>看盤</span></button>
     <button class="nav-btn" data-view="market"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg><span>市場</span></button>
+    <button class="nav-btn" data-view="heatmap"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="10" height="11"/><rect x="13" y="3" width="8" height="6"/><rect x="13" y="9" width="8" height="12"/><rect x="3" y="14" width="10" height="7"/></svg><span>熱力圖</span></button>
     <button class="nav-btn" data-view="rank"><svg viewBox="0 0 24 24"><path d="M4 20V12M10 20V4M16 20v-6M3 20h18"/></svg><span>排行</span></button>
+    <button class="nav-btn" data-view="screener"><svg viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg><span>選股</span></button>
+    <button class="nav-btn" data-view="strategy"><svg viewBox="0 0 24 24"><path d="M4 18l5-6 4 3 7-9"/><circle cx="20" cy="6" r="1.6"/><path d="M4 21h16"/></svg><span>策略</span></button>
     <button class="nav-btn" data-view="options"><svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM12 4v16M4 12h16"/></svg><span>期權</span></button>
     <button class="nav-btn" data-view="news"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span>資訊</span></button>
     <button class="nav-btn" data-view="calendar"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>日曆</span></button>
@@ -87,7 +90,7 @@
             </div>
           </div>
         </div>
-        <div class="overlay-sel" id="overlaySel"></div>
+        <div class="tb-right"><button class="btn-ghost multi-btn" id="multiBtn" title="多圖同框">⊞ 多圖</button><div class="overlay-sel" id="overlaySel"></div></div>
       </div>
       <div class="chart-area">
         <div class="draw-bar" id="drawBar"></div>
@@ -101,6 +104,58 @@
       <div class="ind-tabs" id="indTabs"></div>
     </section>
 
+
+    <section class="view" id="viewHeatmap" hidden>
+      <div class="toolbar"><b class="view-title">市場熱力圖</b><span class="muted small" id="hmSub"></span>
+        <div class="seg" id="hmSize"><button data-s="mcap" class="active">依市值</button><button data-s="value">依成交值</button></div>
+        <span class="flex1"></span><div class="hm-legend" id="hmLegend"></div><span class="rank-upd" id="hmUpd"></span></div>
+      <div class="hm-wrap" id="hmWrap"><div class="empty">載入中…</div></div>
+      <div class="hm-tip" id="hmTip" hidden></div>
+    </section>
+
+    <section class="view" id="viewScreener" hidden>
+      <div class="scr-wrap">
+        <aside class="scr-side">
+          <div class="sub-h" style="margin-top:0">快速範本</div>
+          <div class="preset-row" id="scrPresets"></div>
+          <div class="sub-h">基本條件</div>
+          <div class="scr-fields" id="scrFields"></div>
+          <div class="sub-h">產業</div>
+          <div class="ind-chips" id="scrInd"></div>
+          <div class="sub-h">技術條件 <span class="muted small">（需要抓歷史資料，最多掃描 150 檔）</span></div>
+          <div id="scrTech"></div>
+          <div class="scr-actions"><label class="chk">掃描前 <input class="tin" id="scrLimit" type="number" value="80" style="width:60px"> 檔</label><button class="btn" id="scrRun">開始選股</button></div>
+        </aside>
+        <div class="scr-main">
+          <div class="toolbar"><b class="view-title">選股結果</b><span class="muted small" id="scrInfo"></span><span class="flex1"></span><button class="btn-ghost" id="scrToStrat" disabled>用這些股票建立策略</button><button class="btn-ghost" id="scrAddAll" disabled>全部加入自選</button></div>
+          <div class="scroll-body" id="scrBody"><div class="empty">設定條件後按「開始選股」</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="viewStrategy" hidden>
+      <div class="st-wrap">
+        <aside class="st-side">
+          <div class="st-side-h"><b>我的策略</b><span class="flex1"></span><button class="btn" id="stNew">＋ 新增</button></div>
+          <div class="st-list" id="stList"></div>
+          <div class="sub-h">從範本建立</div>
+          <div class="preset-row col" id="stTemplates"></div>
+          <div class="sub-h">最近訊號</div>
+          <div class="st-events" id="stEvents"></div>
+        </aside>
+        <div class="st-main">
+          <div class="scroll-body" id="stEditor"><div class="empty">選擇左邊的策略，或新增一個</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="viewMulti" hidden>
+      <div class="toolbar"><b class="view-title">多圖同框</b>
+        <div class="seg" id="mtLayout"><button data-l="4">2×2</button><button data-l="6">3×2</button><button data-l="9">3×3</button></div>
+        <div class="seg" id="mtPeriod"><button data-p="tick">分時</button><button data-p="D">日K</button><button data-p="60">60分</button></div>
+        <span class="flex1"></span><button class="btn-ghost" id="mtFill">用自選股填滿</button><button class="btn-ghost" id="mtBack">回單圖</button></div>
+      <div class="mt-grid" id="mtGrid"></div>
+    </section>
     <section class="view" id="viewMarket" hidden>
       <div class="toolbar"><b class="view-title">全球市場</b><span class="muted small">點卡片可以開走勢圖</span><span class="flex1"></span><span class="rank-upd" id="marketUpd"></span></div>
       <div class="scroll-body" id="marketBody"></div>
@@ -242,6 +297,7 @@
 <script src="draw.js"></script>
 <script src="app.js"></script>
 <script src="pages.js"></script>
+<script src="features.js"></script>
 <script src="panels.js"></script>
 <script src="mobile.js"></script>
 <script>if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => {});</script>
