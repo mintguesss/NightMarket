@@ -847,3 +847,9 @@ html[data-theme="light"] #loading { background: rgba(255,255,255,.6); }
 .wreg { display: inline-block; margin-left: 5px; padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 15px; color: #8fa8ff; background: rgba(91,108,255,.14); vertical-align: 1px; }
 html[data-theme="light"] .wreg { color: #3b55d9; background: rgba(59,85,217,.1); }
 .sitem .m.gl { color: #8fa8ff; }
+
+/* 分時時段切換 */
+.sess-btn { padding: 3px 9px; margin-right: 6px; border-radius: 6px; border: 1px solid var(--line2); color: var(--text); font-size: 12.5px; white-space: nowrap; }
+.sess-btn i { font-style: normal; font-size: 10px; color: var(--muted); margin-left: 4px; padding: 0 4px; border-radius: 3px; background: var(--panel2); }
+.sess-btn.active { border-color: var(--accent); color: var(--accent); }
+.sess-btn:hover { border-color: var(--muted); }

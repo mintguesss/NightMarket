@@ -38,7 +38,15 @@ const PERIODS = {
 };
 const INTRADAY_LIVE = new Set(['tick', '1', '5d', '5', '2', '3']);
 const EXT_OK = new Set(['tick', '5d', '1', '2', '3', '5', '10', '15', '30']);
-const useExt = () => state.mkt === 'us' && isUS(state.code) && state.extHours && EXT_OK.has(state.period);
+// 美股分時的時段模式：auto＝跟著目前時段（盤前／盤中／盤後／夜盤），也可以手動選全天或單一時段
+const SESS = { all: '全天', pre: '盤前', reg: '盤中', post: '盤後', night: '夜盤' };
+const sessOn = () => state.period === 'tick' && isUS(state.code) && !state.code.includes('^');
+function sessResolved() {
+  if (state.sessMode !== 'auto') return state.sessMode;
+  const ses = (state.quotes[state.code] || state.quotes['US.^GSPC'] || {}).session;
+  return { PRE: 'pre', REGULAR: 'reg', POST: 'post', OVERNIGHT: 'night' }[ses] || 'reg';
+}
+const useExt = () => isUS(state.code) && EXT_OK.has(state.period) && (state.period === 'tick' ? sessOn() && sessResolved() !== 'reg' : state.mkt === 'us' && state.extHours);
 const inRegular = (t) => !state.regular.length || state.regular.some(([a, b]) => t >= a && t < b);
 
 const $ = (s) => document.querySelector(s);
@@ -80,7 +88,7 @@ const state = {
   paper: null,
   ticket: { side: 'buy', type: 'limit', unit: 1000, price: '', qty: 1 },
   magnet: store.get('tw.magnet', true),
-  extHours: store.get('tw.extHours', true), regular: [], postEnd: null,
+  extHours: store.get('tw.extHours', true), regular: [], postEnd: null, sessMode: store.get('tw.sessMode', 'auto'), sessShown: null, tickWin: null,
 };
 const PER_MKT = new Set(['watch', 'groups']);
 const save = (k) => store.set('tw.' + k + (PER_MKT.has(k) ? '.' + state.mkt : ''), state[k]);
@@ -269,7 +277,7 @@ function renderMain() {
     const last = closes[closes.length - 1], base = state.prev ?? closes[0], col = last >= base ? UP : DOWN;
     primary = mainChart.addAreaSeries({ lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
     mainSeries.push(primary);
-    const data = bars.map((b) => ({ time: toTime(b.t), value: b.c }));
+    const data = bars.map((b) => (inRegular(b.t) ? { time: toTime(b.t), value: b.c } : { time: toTime(b.t), value: b.c, lineColor: CT.ext, topColor: CT.ext + '22', bottomColor: CT.ext + '03' }));
     if (state.period === 'tick') {
       const end = state.sessionEnd && state.sessionEnd > bars[0].t && state.sessionEnd - bars[0].t < 86400 ? state.sessionEnd
         : Math.floor((bars[0].t + state.off) / 86400) * 86400 - state.off + 13.5 * 3600;
@@ -291,6 +299,7 @@ function renderMain() {
     mainSeries.push(primary);
     primary.setData(bars.map((b) => {
       const o = { time: toTime(b.t), open: b.o, high: b.h, low: b.l, close: b.c };
+      if (!inRegular(b.t)) { const c = (b.c >= b.o ? UP : DOWN) + '66'; Object.assign(o, { color: c, borderColor: c, wickColor: c }); } // 盤前盤後K棒半透明
       return o;
     }));
     state.overlays.forEach((k) => {
@@ -419,6 +428,17 @@ async function loadKline(keepRange = false) {
     state.regular = d.ext ? d.regular || [] : []; state.postEnd = d.postEnd;
     let bars = d.bars;
     if (state.period === 'tick' && bars.length) { const lastDay = Math.floor((bars[bars.length - 1].t + state.off) / 86400); bars = bars.filter((b) => Math.floor((b.t + state.off) / 86400) === lastDay); }
+    state.tickWin = null; state.sessShown = null;
+    if (sessOn() && bars.length) {
+      const m = sessResolved(), H = 3600, now = Date.now() / 1000;
+      const reg = (d.regular || []).at(-1) || [d.sessionStart, d.sessionEnd];
+      const nightNow = state.quotes[code]?.session === 'OVERNIGHT' && now > reg[1];
+      const W = { all: [reg[0] - 5.5 * H, reg[1] + 4 * H], pre: [reg[0] - 5.5 * H, reg[0]], reg: [reg[0], reg[1]], post: [reg[1], reg[1] + 4 * H],
+        night: nightNow ? [reg[1] + 4 * H, reg[1] + 12 * H] : [reg[0] - 13.5 * H, reg[0] - 5.5 * H] }[m];
+      bars = bars.filter((b) => b.t >= W[0] && b.t < W[1]);
+      state.tickWin = W; state.sessShown = m; state.sessionEnd = W[1];
+      if (m !== 'all') state.regular = []; // 單一時段不用把盤前盤後畫暗
+    }
     if (P.agg) bars = aggregate(bars, P.agg, state.off);
     if (!state.quotes[code]) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + encodeURIComponent(code))); } catch {} }
     if (seq !== klineSeq) return;
@@ -437,13 +457,16 @@ async function loadKline(keepRange = false) {
       if (P.line) mainChart.timeScale().fitContent();
       else { const n = bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); }
     }
-    if (!bars.length) $('#legendMain').innerHTML = '<span class="lbl">此週期沒有資料</span>';
+    if (!bars.length) $('#legendMain').innerHTML = `<span class="lbl">${state.sessShown === 'night' ? '夜盤（美東 20:00–04:00）：資料來源 Yahoo 沒有提供夜盤逐筆走勢' : state.sessShown ? SESS[state.sessShown] + '時段目前還沒有資料' : '此週期沒有資料'}</span>`;
+    syncSessBtn();
   } catch (e) {
     if (seq === klineSeq) $('#legendMain').innerHTML = `<span class="lbl">K線載入失敗：${esc(e.message)}</span>`;
   } finally { if (seq === klineSeq) $('#loading').classList.remove('show'); }
 }
 function liveUpdate() {
   let q = state.quotes[state.code]; const P = PERIODS[state.period];
+  if (sessOn() && state.sessMode === 'auto' && state.sessShown && sessResolved() !== state.sessShown) { loadKline(); return; }
+  if (sessOn() && state.tickWin && q && (state.sessShown === 'night' || (q.ext?.ts || q.ts) >= state.tickWin[1])) return;
   if (q && useExt() && (q.session === 'PRE' || q.session === 'POST') && q.ext?.ts) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
   if (!q?.ts || q.price == null || !state.bars.length || !q.isOpen || !INTRADAY_LIVE.has(state.period)) return;
   const step = P.agg || ({ '1m': 60, '2m': 120, '5m': 300 }[P.interval]); if (!step) return;
@@ -1063,12 +1086,32 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---------- 工具列 ---------- */
+function syncSessBtn() {
+  let sb = $('#sessBtn');
+  if (!sb) {
+    sb = document.createElement('button'); sb.id = 'sessBtn'; sb.className = 'sess-btn'; $('#periods').prepend(sb);
+    sb.addEventListener('click', (e) => {
+      e.stopPropagation(); const r = sb.getBoundingClientRect(), cur = state.sessMode;
+      const pick = (v) => { state.sessMode = v; store.set('tw.sessMode', v); loadKline(); syncSessBtn(); };
+      openMenu(r.left, r.bottom + 4, [
+        { label: `${cur === 'auto' ? '✓ ' : '　'}自動（跟著目前時段）`, act: () => pick('auto') },
+        ...Object.entries(SESS).map(([k, n]) => ({ label: `${cur === k ? '✓ ' : '　'}${n}${{ all: '　04:00–20:00', pre: '　04:00–09:30', reg: '　09:30–16:00', post: '　16:00–20:00', night: '　20:00–04:00' }[k]}`, act: () => pick(k) })),
+      ]);
+    });
+  }
+  sb.hidden = !sessOn();
+  const m = sessResolved();
+  sb.innerHTML = `${SESS[m]}${state.sessMode === 'auto' ? '<i>自動</i>' : ''} ▾`;
+  sb.title = '分時時段（美東時間）：自動會跟著目前是盤前、盤中、盤後或夜盤切換';
+  sb.classList.toggle('active', state.sessMode !== 'auto');
+}
 function syncToolbar() {
   const P = PERIODS[state.period];
+  syncSessBtn();
   let eb = $('#extBtn');
   if (!eb) { eb = document.createElement('button'); eb.id = 'extBtn'; eb.className = 'ext-btn'; eb.title = '美股盤前（04:00–09:30）與盤後（16:00–20:00，美東時間）'; eb.textContent = '盤前盤後'; $('#periods').appendChild(eb);
     eb.addEventListener('click', (e) => { e.stopPropagation(); state.extHours = !state.extHours; store.set('tw.extHours', state.extHours); syncToolbar(); loadKline(); }); }
-  eb.hidden = state.mkt !== 'us'; eb.classList.toggle('active', state.extHours); eb.disabled = !EXT_OK.has(state.period);
+  eb.hidden = state.mkt !== 'us' || sessOn(); eb.classList.toggle('active', state.extHours); eb.disabled = !EXT_OK.has(state.period);
   $$('#periods > button[data-p]').forEach((b) => b.classList.toggle('active', b.dataset.p === state.period));
   $$('#moreMenu button').forEach((b) => b.classList.toggle('active', b.dataset.p === state.period));
   $('#moreBtn').classList.toggle('active', !!P.more); $('#moreBtn').textContent = (P.more ? P.label : '更多') + ' ▾';
