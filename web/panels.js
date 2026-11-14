@@ -36,6 +36,7 @@
     syncRail();
   });
   function syncRail() {
+    const qb = $('#rail [data-sp="quote"]'); if (qb) qb.hidden = !(isTW(state.code) || state.code === 't00'); // 只有台股有五檔／法人，其他市場和「下單」重複
     $$('#rail [data-sp]').forEach((b) => {
       const on = !state.layout.noRight && (b.dataset.sp === 'trade' ? cur === 'quote' && state.sideTab === 'trade' : b.dataset.sp === 'quote' ? cur === 'quote' && state.sideTab !== 'trade' : b.dataset.sp === cur);
       b.classList.toggle('active', on);

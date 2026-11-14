@@ -74,7 +74,7 @@ const state = {
   alerts: store.get('tw.alerts', {}),
   alertLog: store.get('tw.alertLog', []),
   settings: Object.assign({ colorMode: 'redUp', pctBox: false, showExt: true, spark: true, sortKey: null, sortDir: 0, refresh: 5 }, store.get('tw.settings', {})),
-  layout: Object.assign({ lw: 380, rw: 320, noLeft: false, noRight: false }, store.get('tw.layout', {})),
+  layout: Object.assign({ lw: 440, rw: 320, noLeft: false, noRight: false }, store.get('tw.layout', {}), store.get('tw.lw440') ? {} : { lw: Math.max(440, store.get('tw.layout', {}).lw || 0) }),
   filter: 'all',
   view: 'chart',
   code: store.get('tw.code.' + MKT0, DEFAULT_CODE[MKT0]),
@@ -598,9 +598,9 @@ function renderWatch() {
     return `<div class="wrow ${c === state.code ? 'active' : ''} ${state.stars.includes(c) ? 'star' : ''} ${state.pinned.includes(c) ? 'pinned' : ''}" data-code="${esc(c)}">
       <div class="wname"><b>${esc(nameOf(c))}</b><small>${esc(showCode(c))}${isGL(c) ? `<span class="wreg">${regionOf(c)}</span>` : ''}${al && (al.above || al.below || al.pctUp || al.pctDown) ? '<span class="walert">🔔</span>' : ''}</small>${state.notes[c] ? `<span class="wnote">${esc(state.notes[c])}</span>` : ''}</div>
       ${S.spark ? '<canvas></canvas>' : '<span></span>'}
-      <span class="num wp ${k}">${fmtP(q?.price, pxDp(q?.price))}${x ? `<small class="${xk}">${fmtP(x.price, pxDp(x.price))}</small>` : ''}</span>
-      <span class="num wc ${k}">${pctTxt}${x ? `<small class="${xk}">${sign(xd)}${((xd / q.price) * 100).toFixed(2)}%<em>${esc(x.label)}</em></small>` : ''}</span>
-      <span class="num ${k}">${q ? sign(d) + fmtP(d, pxDp(q.price)) : '--'}</span></div>`;
+      <span class="num wp ${k}">${fmtP(q?.price, pxDp(q?.price))}${x ? `<small class="wx ${xk}"><i>${esc(x.label)}</i>${fmtP(x.price, pxDp(x.price))}</small>` : ''}</span>
+      <span class="num wc ${k}">${pctTxt}${x ? `<small class="wx ${xk}">${sign(xd)}${((xd / q.price) * 100).toFixed(2)}%</small>` : ''}</span>
+      <span class="num wd ${k}">${q ? sign(d) + fmtP(d, pxDp(q.price)) : '--'}${x ? `<small class="wx ${xk}">${sign(xd)}${fmtP(xd, pxDp(q.price))}</small>` : ''}</span></div>`;
   }).join('');
   // 小走勢依畫布實際大小繪製（手機版放大）
   if (S.spark) el.querySelectorAll('.wrow').forEach((r) => { const cv = r.querySelector('canvas'); drawSpark(cv, state.sparks[r.dataset.code], cv.clientWidth || 58, cv.clientHeight || 26, r.dataset.code); });
@@ -954,7 +954,7 @@ function settingsPanel() {
     <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
     [{ label: '取消' }, { label: '儲存', act: (m) => { const lang = m.querySelector('#stLang').value; if (lang !== LANG) { setLang(lang); return; } S.colorMode = m.querySelector('#stColor').value; S.theme = m.querySelector('#stTheme').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); applyTheme(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
   $('#stNotify').onclick = () => { closeModal(); notifyPanel(); };
-  $('#stLayout').onclick = () => { state.layout = { lw: 380, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
+  $('#stLayout').onclick = () => { state.layout = { lw: 440, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
   $('#stExport').onclick = () => {
     const data = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('tw.')) data[k] = localStorage.getItem(k); }
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })); a.download = '看盤設定備份.json'; a.click();
@@ -973,7 +973,7 @@ function applyLayout() {
   app.classList.toggle('no-left', L.noLeft); app.classList.toggle('no-right', L.noRight);
   $('[data-resize="left"] .rz-btn').textContent = L.noLeft ? '›' : '‹';
   $('[data-resize="right"] .rz-btn').textContent = L.noRight ? '‹' : '›';
-  store.set('tw.layout', L);
+  store.set('tw.layout', L); store.set('tw.lw440', 1);
   setTimeout(() => draw.resize(), 50);
 }
 document.addEventListener('click', (e) => {
@@ -986,7 +986,7 @@ $$('.resizer').forEach((rz) => {
     const side = rz.dataset.resize, L = state.layout, startX = e.clientX, start = side === 'left' ? L.lw : L.rw;
     if ((side === 'left' && L.noLeft) || (side === 'right' && L.noRight)) return;
     rz.classList.add('drag'); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
-    const mv = (ev) => { const dx = ev.clientX - startX, w = Math.max(240, Math.min(640, side === 'left' ? start + dx : start - dx)); side === 'left' ? (L.lw = w) : (L.rw = w); $('#app').style.setProperty(side === 'left' ? '--lw' : '--rw', w + 'px'); };
+    const mv = (ev) => { const dx = ev.clientX - startX, w = Math.max(300, Math.min(720, side === 'left' ? start + dx : start - dx)); side === 'left' ? (L.lw = w) : (L.rw = w); $('#app').style.setProperty(side === 'left' ? '--lw' : '--rw', w + 'px'); };
     const upf = () => { rz.classList.remove('drag'); document.body.style.cursor = ''; document.body.style.userSelect = ''; window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', upf); applyLayout(); };
     window.addEventListener('mousemove', mv); window.addEventListener('mouseup', upf);
   });
@@ -1086,6 +1086,15 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ---------- 工具列 ---------- */
+// 各時段的台北時間（美國日光節約時自動提早一小時），例如冬令盤中 22:30–05:00
+function sessRange(k) {
+  const now = new Date(), y = now.getUTCFullYear();
+  const nth = (m, n) => { const d = new Date(Date.UTC(y, m, 1)); return 1 + ((7 - d.getUTCDay()) % 7) + (n - 1) * 7; }; // 第 n 個星期日
+  const dst = now >= new Date(Date.UTC(y, 2, nth(2, 2), 7)) && now < new Date(Date.UTC(y, 10, nth(10, 1), 6));
+  const et = dst ? -4 : -5, tw = (h) => { const x = (((h - et + 8) % 24) + 24) % 24, hh = Math.floor(x), mm = Math.round((x - hh) * 60); return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; };
+  const R = { pre: [4, 9.5], reg: [9.5, 16], post: [16, 20], night: [20, 28] }[k];
+  return `${tw(R[0])}–${tw(R[1])}`;
+}
 function syncSessBtn() {
   let sb = $('#sessBtn');
   if (!sb) {
@@ -1095,14 +1104,14 @@ function syncSessBtn() {
       const pick = (v) => { state.sessMode = v; store.set('tw.sessMode', v); loadKline(); syncSessBtn(); };
       openMenu(r.left, r.bottom + 4, [
         { label: `${cur === 'auto' ? '✓ ' : '　'}自動（跟著目前時段）`, act: () => pick('auto') },
-        ...Object.entries(SESS).map(([k, n]) => ({ label: `${cur === k ? '✓ ' : '　'}${n}${{ all: '　04:00–20:00', pre: '　04:00–09:30', reg: '　09:30–16:00', post: '　16:00–20:00', night: '　20:00–04:00' }[k]}`, act: () => pick(k) })),
+        ...Object.entries(SESS).map(([k, n]) => ({ label: `${cur === k ? '✓ ' : '　'}${n}${k === 'all' ? '' : '　' + sessRange(k)}`, act: () => pick(k) })),
       ]);
     });
   }
   sb.hidden = !sessOn();
   const m = sessResolved();
-  sb.innerHTML = `${SESS[m]}${state.sessMode === 'auto' ? '<i>自動</i>' : ''} ▾`;
-  sb.title = '分時時段（美東時間）：自動會跟著目前是盤前、盤中、盤後或夜盤切換';
+  sb.innerHTML = `${SESS[m]} ▾`;
+  sb.title = '分時時段：預設跟著目前是盤前、盤中、盤後或夜盤自動切換';
   sb.classList.toggle('active', state.sessMode !== 'auto');
 }
 function syncToolbar() {
