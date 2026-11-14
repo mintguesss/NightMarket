@@ -6,7 +6,8 @@ const MARKET_SECTIONS = {
   tw: [
     ['台股大盤', [['t00', '加權指數'], ['o00', '櫃買指數'], ['FUT.TXF', '台指期近月'], ['FUT.MXF', '小台指近月'], ['0050', '元大台灣50'], ['00631L', '台灣50正2']]],
     ['權值股', [['2330', '台積電'], ['2317', '鴻海'], ['2454', '聯發科'], ['2308', '台達電'], ['2382', '廣達'], ['2881', '富邦金']]],
-    ['亞洲股市', [['Y.^N225', '日經225'], ['Y.^HSI', '恆生指數'], ['Y.^KS11', '韓國綜合'], ['Y.000001.SS', '上證指數'], ['Y.^STI', '新加坡海峽']]],
+    ['亞洲股市', [['Y.^N225', '日經225'], ['Y.^KS11', '韓國綜合'], ['Y.^KQ11', '韓國KOSDAQ'], ['Y.^HSI', '恆生指數'], ['Y.000001.SS', '上證指數'], ['Y.399001.SZ', '深證成指'], ['Y.^STI', '新加坡海峽'], ['Y.^BSESN', '印度Sensex'], ['Y.^AXJO', '澳洲200']]],
+    ['亞洲熱門股', [['G.005930.KS', '三星電子'], ['G.000660.KS', 'SK海力士'], ['G.8035.T', '東京威力科創'], ['G.6857.T', '愛德萬測試'], ['G.7203.T', '豐田汽車'], ['G.9984.T', '軟銀集團'], ['G.0700.HK', '騰訊'], ['G.1810.HK', '小米'], ['G.0981.HK', '中芯國際']]],
     ['匯率', [['FX.USDTWD', '美元/台幣'], ['Y.JPYTWD=X', '日圓/台幣'], ['Y.CNYTWD=X', '人民幣/台幣'], ['Y.EURTWD=X', '歐元/台幣']]],
   ],
   us: [
@@ -14,6 +15,8 @@ const MARKET_SECTIONS = {
     ['指數期貨', [['Y.ES=F', '標普期貨'], ['Y.NQ=F', '那斯達克期貨'], ['Y.YM=F', '道瓊期貨'], ['Y.RTY=F', '羅素期貨']]],
     ['類股 ETF', [['US.XLK', '科技'], ['US.SMH', '半導體'], ['US.XLF', '金融'], ['US.XLE', '能源'], ['US.XLV', '醫療'], ['US.XLY', '非必需消費'], ['US.XLI', '工業'], ['US.XLC', '通訊'], ['US.XLP', '必需消費'], ['US.XLU', '公用事業'], ['US.XLRE', '房地產'], ['US.XLB', '原物料']]],
     ['債券・匯率', [['Y.^TNX', '美債10年殖利率'], ['Y.^IRX', '美債3月殖利率'], ['Y.DX-Y.NYB', '美元指數'], ['Y.EURUSD=X', '歐元/美元'], ['Y.USDJPY=X', '美元/日圓']]],
+    ['歐洲・全球股市', [['Y.^FTSE', '英國富時100'], ['Y.^GDAXI', '德國DAX'], ['Y.^FCHI', '法國CAC40'], ['Y.^STOXX50E', '歐洲斯托克50'], ['Y.^N225', '日經225'], ['Y.^KS11', '韓國綜合'], ['Y.^HSI', '恆生指數'], ['Y.^GSPTSE', '加拿大TSX']]],
+    ['全球熱門股', [['G.ASML.AS', '艾司摩爾'], ['G.SAP.DE', '思愛普'], ['G.NOVO-B.CO', '諾和諾德'], ['G.MC.PA', '路威酩軒'], ['G.AZN.L', '阿斯特捷利康'], ['G.005930.KS', '三星電子'], ['G.000660.KS', 'SK海力士'], ['G.7203.T', '豐田汽車'], ['G.0700.HK', '騰訊']]],
     ['商品・加密貨幣', [['Y.CL=F', '原油'], ['Y.GC=F', '黃金'], ['Y.SI=F', '白銀'], ['Y.HG=F', '銅'], ['Y.BTC-USD', '比特幣'], ['Y.ETH-USD', '以太幣']]],
   ],
 };
@@ -34,10 +37,10 @@ PAGES.market = {
   tick() { if (!this.t || Date.now() - this.t > 15000) { this.t = Date.now(); this.refresh(); } },
   render() {
     $('#marketBody').innerHTML = MARKET_SECTIONS[state.mkt].map(([title, list]) => `<div class="sec-title"><b>${title}</b></div><div class="cards">${list.map(([c, n]) => {
-      const q = state.quotes[c], { d, pct } = chgOf(q), k = cls(d), fx = c.includes('=X') || c.startsWith('FX.'), dp = fx ? 4 : c.startsWith('FUT.') ? 0 : 2;
+      const q = state.quotes[c], { d, pct } = chgOf(q), k = cls(d), fx = c.includes('=X') || c.startsWith('FX.'), dp = fx ? 4 : c.startsWith('FUT.') ? 0 : pxDp(q?.price);
       return `<div class="card ${c.startsWith('FUT.') || c === 'o00' ? '' : 'click'}" data-code="${esc(c)}"><div class="k"><span>${esc(n)}</span><span>${esc(showCode(c).replace('FUT.', ''))}</span></div>
         <div class="v num ${k}">${fmtP(q?.price, dp)}</div><div class="s num ${k}">${q ? `${sign(d)}${fmtP(d, dp)}　${sign(pct)}${pct.toFixed(2)}%` : '--'}</div><canvas></canvas></div>`;
-    }).join('')}</div>`).join('') + '<div class="hint" style="padding:16px">期貨、商品、加密貨幣等為 Yahoo Finance 資料，部分可能延遲。</div>';
+    }).join('')}</div>`).join('') + '<div class="hint" style="padding:16px">期貨、商品、加密貨幣與其他國家股市為 Yahoo Finance 資料，多數延遲 15–20 分鐘。點卡片可看走勢，加入自選後台股、美股清單都能放。</div>';
     $$('#marketBody .card').forEach((el) => { const cv = el.querySelector('canvas'); if (state.sparks[el.dataset.code]) drawSpark(cv, state.sparks[el.dataset.code], 80, 32, el.dataset.code); });
   },
 };

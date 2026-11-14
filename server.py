@@ -141,7 +141,7 @@ def yahoo_symbol(code):
         return code[3:]
     if code.startswith("FX."):
         return code[3:] + "=X"
-    if code.startswith("Y."):
+    if code.startswith("Y.") or code.startswith("G."):  # G. = 其他股市個股（日韓港陸歐…），後面直接是 Yahoo 代碼
         return code[2:]
     if code.startswith("OPT.US:"):
         return code[7:]
@@ -280,7 +280,7 @@ def yahoo_quote(code):
         for i in range(len(ts) - 1, -1, -1):
             if q["close"][i] is not None:
                 t = ts[i]
-                if reg and (t >= reg.get("end", 1e18) or t < reg.get("start", 0)):
+                if reg and code.startswith("US.") and (t >= reg.get("end", 1e18) or t < reg.get("start", 0)):  # 只有美股有盤前盤後
                     is_pre = pre_p.get("start", 0) <= t < reg.get("start", 0)
                     ext = {"price": q["close"][i], "label": "盤前" if is_pre else "盤後", "time": _fmt_local(t, off), "ts": t}
                 break
@@ -302,7 +302,7 @@ def yahoo_quote(code):
         trade_px = ext["price"] if (sess in ("PRE", "POST") and ext) else m.get("regularMarketPrice")
         return {
             "code": code, "symbol": sym, "name": m.get("shortName") or m.get("longName") or sym,
-            "fullName": m.get("longName"), "mkt": "us" if code.startswith("US.") else "fx",
+            "fullName": m.get("longName"), "mkt": "us" if code.startswith("US.") else "gl" if code.startswith("G.") else "fx",
             "price": m.get("regularMarketPrice"), "prev": m.get("chartPreviousClose") or m.get("previousClose"),
             "open": opn, "high": m.get("regularMarketDayHigh"), "low": m.get("regularMarketDayLow"),
             "volume": m.get("regularMarketVolume"), "w52h": m.get("fiftyTwoWeekHigh"), "w52l": m.get("fiftyTwoWeekLow"),
@@ -506,22 +506,61 @@ def tw_spark_batch(syms):
     return cached("twspark:" + ",".join(syms), 60, load)
 
 
-# ---------------- 搜尋 (美股) ----------------
+# ---------------- 搜尋（美股＋其他股市） ----------------
 US_EX = {"NMS", "NYQ", "NGM", "NCM", "ASE", "PCX", "BTS", "NAS", "NYS", "CBO"}
+_CJK_Q = re.compile(r"[぀-ヿ㐀-鿿가-힯]")
+
+
+def _zh_search(q):
+    """中文名稱查詢：Yahoo 搜尋不吃中文（會回 400），改查本機的中文名稱表"""
+    ql = q.lower()
+    hits = [(c, n) for c, n in ZH_NAMES.items() if ql in n.lower() and (c.startswith("US.") or c.startswith("G."))]
+    hits.sort(key=lambda x: (not x[1].lower().startswith(ql), len(x[1])))
+    return [{"code": c, "name": n, "mkt": "us" if c.startswith("US.") else "gl", "ex": "美股" if c.startswith("US.") else region_of(c)} for c, n in hits[:12]]
+
+
+REGION = {"KS": "韓股", "KQ": "韓股", "T": "日股", "HK": "港股", "SS": "陸股", "SZ": "陸股", "L": "英股", "DE": "德股", "F": "德股",
+          "PA": "法股", "AS": "荷股", "SW": "瑞士", "MI": "義股", "MC": "西股", "ST": "瑞典", "CO": "丹麥", "OL": "挪威", "HE": "芬蘭",
+          "BR": "比股", "TO": "加股", "V": "加股", "AX": "澳股", "NZ": "紐股", "SI": "星股", "NS": "印股", "BO": "印股", "KL": "馬股",
+          "BK": "泰股", "JK": "印尼", "SA": "巴西", "MX": "墨股"}
+
+
+def region_of(code):
+    suf = code.rsplit(".", 1)[-1] if code.count(".") >= 2 else ""
+    return REGION.get(suf, "國際")
+
+
+_SECONDARY = {"F", "BE", "DU", "MU", "SG", "HM", "IL", "VI", "MX", "BA", "SN", "NE", "CN"}  # 法蘭克福等地的重複掛牌，結果太雜
 
 
 def us_search(q):
-    url = ("https://query1.finance.yahoo.com/v1/finance/search?quotesCount=10&newsCount=0&q="
+    q = q.strip()
+    if not q:
+        return []
+    if _CJK_Q.search(q):
+        return _zh_search(q)
+    url = ("https://query1.finance.yahoo.com/v1/finance/search?quotesCount=15&newsCount=0&q="
            + urllib.parse.quote(q))
-    d = cached("search:" + q.lower(), 300, lambda: fetch_json(url))
+    try:
+        d = cached("search:" + q.lower(), 300, lambda: fetch_json(url, timeout=6))
+    except Exception:
+        d = {}
     if not d.get("quotes"):  # Yahoo 偶爾回空結果（限流），不要快取 5 分鐘
         with _cache_lock:
             _cache.pop("search:" + q.lower(), None)
     out = []
     for r in d.get("quotes", []):
-        if r.get("quoteType") in ("EQUITY", "ETF") and r.get("exchange") in US_EX:
-            out.append({"code": "US." + r["symbol"], "name": r.get("shortname") or r.get("longname") or r["symbol"],
-                        "mkt": "us", "ex": r.get("exchDisp")})
+        sym, qt = r.get("symbol") or "", r.get("quoteType")
+        if qt not in ("EQUITY", "ETF") or not sym:
+            continue
+        name = r.get("shortname") or r.get("longname") or sym
+        if r.get("exchange") in US_EX and "." not in sym.replace("BRK.", "").replace("BF.", ""):
+            out.append({"code": "US." + sym, "name": name, "mkt": "us", "ex": r.get("exchDisp")})
+        elif sym.endswith(".TW") or sym.endswith(".TWO"):
+            out.append({"code": sym.split(".")[0], "name": name, "mkt": "otc" if sym.endswith(".TWO") else "tse"})
+        elif "." in sym and sym.rsplit(".", 1)[1] not in _SECONDARY:
+            code = "G." + sym
+            out.append({"code": code, "name": zh_name(code, name), "mkt": "gl", "ex": region_of(code)})
     return out
 
 

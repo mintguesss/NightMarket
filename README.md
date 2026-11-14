@@ -36,6 +36,7 @@ python server.py        # then open http://localhost:8765
 | **Screener** | Fundamental filters (price, change, volume, market cap, P/E, yield, P/B, sector) + technical conditions · turn results into a strategy in one click |
 | **Heatmap** | Top 250 Taiwan / top 300 US stocks by market cap, grouped by sector |
 | **Multi-chart** | 2×2, 3×2 or 3×3 grid |
+| **Global stocks** | Search and watch stocks from Japan, Korea, Hong Kong, China, Europe, India, Australia and more alongside your Taiwan/US lists — charts, key data and Chinese names for 70+ majors |
 | **Market data** | Global indices, futures, sector ETFs, FX, commodities, crypto · gainers/losers/volume movers · company profile, monthly revenue (TW), EPS, dividends, analyst targets (US), news, filings |
 | **Options** | TAIEX options chain (incl. weeklies) and US options chain, paper trading |
 | **Calendar** | Weekly view of earnings (pre/post-market), economic releases, dividends and market holidays |
@@ -118,6 +119,7 @@ The engine lives in [`strategy.py`](strategy.py) (standard library only) and can
 | TAIEX futures & options | TAIFEX MIS | real time |
 | US quotes, charts, extended hours | Yahoo Finance | < 1 s during market hours |
 | US options | Yahoo Finance | may be delayed |
+| Other markets (JP, KR, HK, EU…) | Yahoo Finance | mostly 15–20 min delay |
 | Company data, revenue, dividends, institutional flows | TWSE / TPEx open data, Yahoo Finance | daily |
 | Earnings & economic calendar, US screener | Nasdaq | daily / live |
 | News | Yahoo, cnyes | — |

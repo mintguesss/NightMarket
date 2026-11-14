@@ -90,16 +90,20 @@ const api = (p) => fetch(p).then((r) => { if (!r.ok) throw new Error('HTTP ' + r
 const post = (p, body) => fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
 const cls = (d) => (d > 0 ? 'up' : d < 0 ? 'down' : 'flat');
 const fmtP = (v, d = 2) => (v == null || isNaN(v) ? '--' : Number(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }));
+const pxDp = (v) => (Math.abs(v) >= 10000 ? 0 : 2); // 韓圜、日圓這類大數字價格不顯示小數
 const fmtInt = (v) => (v == null || isNaN(v) ? '--' : Math.round(v).toLocaleString('en-US'));
 const sign = (v) => (v > 0 ? '+' : '');
 const fmtVol = (v) => { if (v == null || isNaN(v)) return '--'; const a = Math.abs(v);
   if (LANG === 'en') return a >= 1e12 ? (v / 1e12).toFixed(2) + 'T' : a >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (v / 1e6).toFixed(2) + 'M' : a >= 1e4 ? (v / 1e3).toFixed(1) + 'K' : Math.round(v).toLocaleString();
   if (a >= 1e12) return (v / 1e12).toFixed(2) + '兆'; if (a >= 1e8) return (v / 1e8).toFixed(2) + '億'; if (a >= 1e4) return (v / 1e4).toFixed(2) + '萬'; return Math.round(v).toLocaleString(); };
 const isUS = (c) => c.startsWith('US.');
+const isGL = (c) => c.startsWith('G.'); // 其他股市個股：G.005930.KS（韓）、G.7203.T（日）、G.0700.HK（港）…
+const REGION_ZH = { KS: '韓股', KQ: '韓股', T: '日股', HK: '港股', SS: '陸股', SZ: '陸股', L: '英股', DE: '德股', F: '德股', PA: '法股', AS: '荷股', SW: '瑞士', MI: '義股', MC: '西股', ST: '瑞典', CO: '丹麥', OL: '挪威', HE: '芬蘭', BR: '比股', TO: '加股', V: '加股', AX: '澳股', NZ: '紐股', SI: '星股', NS: '印股', BO: '印股', KL: '馬股', BK: '泰股', JK: '印尼', SA: '巴西', MX: '墨股' };
+const regionOf = (c) => REGION_ZH[c.split('.').pop()] || '國際';
 const isTW = (c) => !c.includes('.') && c !== 't00' && c !== 'o00';
 const isEtf = (c) => /^00/.test(c) || ['US.QQQ', 'US.SPY', 'US.VOO', 'US.SOXX', 'US.SMH', 'US.DIA', 'US.IWM', 'US.TQQQ', 'US.SOXL'].includes(c);
 const isOpt = (c) => c.startsWith('OPT.');
-const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : c.startsWith('Y.') ? c.slice(2).replace(/=F$|-USD$/, '') : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
+const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : isGL(c) ? c.slice(2).replace(/\.[A-Z]{1,3}$/, '') : c.startsWith('Y.') ? c.slice(2).replace(/=F$|-USD$/, '') : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
 const multOf = (c) => (c.startsWith('OPT.TW:') ? 50 : c.startsWith('OPT.US:') ? 100 : 1);
 const mktOf = (c) => (isUS(c) ? 'us' : state.listMap[c]?.mkt || state.quotes[c]?.mkt);
 // 常見美股、期貨、加密貨幣的中文名稱（台灣慣用譯名）放在 names-zh.json，前後端共用；中文介面優先顯示
@@ -260,7 +264,7 @@ function renderMain() {
   state.fillTimes = null;
   const bars = state.bars, P = PERIODS[state.period];
   if (!bars.length) { primary = null; draw.redraw(); return; }
-  const closes = bars.map((b) => b.c), pf = { type: 'price', precision: 2, minMove: 0.01 };
+  const closes = bars.map((b) => b.c), big = pxDp(closes[closes.length - 1]) === 0, pf = big ? { type: 'price', precision: 0, minMove: 1 } : { type: 'price', precision: 2, minMove: 0.01 };
   if (P.line) {
     const last = closes[closes.length - 1], base = state.prev ?? closes[0], col = last >= base ? UP : DOWN;
     primary = mainChart.addAreaSeries({ lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
@@ -570,11 +574,11 @@ function renderWatch() {
     const x = S.showExt && q?.ext && q.price ? q.ext : null, xd = x ? x.price - q.price : 0, xk = cls(xd);
     const pctTxt = q ? (S.pctBox ? `<span class="pctbox ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : sign(pct) + pct.toFixed(2) + '%') : '--';
     return `<div class="wrow ${c === state.code ? 'active' : ''} ${state.stars.includes(c) ? 'star' : ''} ${state.pinned.includes(c) ? 'pinned' : ''}" data-code="${esc(c)}">
-      <div class="wname"><b>${esc(nameOf(c))}</b><small>${esc(showCode(c))}${al && (al.above || al.below || al.pctUp || al.pctDown) ? '<span class="walert">🔔</span>' : ''}</small>${state.notes[c] ? `<span class="wnote">${esc(state.notes[c])}</span>` : ''}</div>
+      <div class="wname"><b>${esc(nameOf(c))}</b><small>${esc(showCode(c))}${isGL(c) ? `<span class="wreg">${regionOf(c)}</span>` : ''}${al && (al.above || al.below || al.pctUp || al.pctDown) ? '<span class="walert">🔔</span>' : ''}</small>${state.notes[c] ? `<span class="wnote">${esc(state.notes[c])}</span>` : ''}</div>
       ${S.spark ? '<canvas></canvas>' : '<span></span>'}
-      <span class="num wp ${k}">${fmtP(q?.price)}${x ? `<small class="${xk}">${fmtP(x.price)}</small>` : ''}</span>
+      <span class="num wp ${k}">${fmtP(q?.price, pxDp(q?.price))}${x ? `<small class="${xk}">${fmtP(x.price, pxDp(x.price))}</small>` : ''}</span>
       <span class="num wc ${k}">${pctTxt}${x ? `<small class="${xk}">${sign(xd)}${((xd / q.price) * 100).toFixed(2)}%<em>${esc(x.label)}</em></small>` : ''}</span>
-      <span class="num ${k}">${q ? sign(d) + fmtP(d) : '--'}</span></div>`;
+      <span class="num ${k}">${q ? sign(d) + fmtP(d, pxDp(q.price)) : '--'}</span></div>`;
   }).join('');
   // 小走勢依畫布實際大小繪製（手機版放大）
   if (S.spark) el.querySelectorAll('.wrow').forEach((r) => { const cv = r.querySelector('canvas'); drawSpark(cv, state.sparks[r.dataset.code], cv.clientWidth || 58, cv.clientHeight || 26, r.dataset.code); });
@@ -748,7 +752,7 @@ function renderSide() {
   $('#sideCode').innerHTML = isIdx ? 'TWSE 指數' : tw ? `${c}　${mktOf(c) === 'otc' ? '上櫃' : '上市'}${isEtf(c) ? '・ETF' : ''}` : `${esc(showCode(c))}　${esc(q?.exchange || '')}　${esc(q?.currency || '')}`;
   $('#favBtn').style.visibility = isIdx ? 'hidden' : 'visible';
   $('#favBtn').classList.toggle('on', state.watch.includes(c));
-  $('#sidePrice').innerHTML = q ? `<span class="big num ${k}">${fmtP(q.price)}</span><span class="chg num ${k}">${d > 0 ? '▲' : d < 0 ? '▼' : ''}${fmtP(Math.abs(d))}　${sign(pct)}${pct.toFixed(2)}%</span>` : '<span class="big num">--</span>';
+  $('#sidePrice').innerHTML = q ? `<span class="big num ${k}">${fmtP(q.price, pxDp(q.price))}</span><span class="chg num ${k}">${d > 0 ? "▲" : d < 0 ? "▼" : ""}${fmtP(Math.abs(d), pxDp(q.price))}　${sign(pct)}${pct.toFixed(2)}%</span>` : '<span class="big num">--</span>';
   const ds = q?.date ? `${q.date.slice(4, 6)}/${q.date.slice(6)}` : '';
   const SESL = { REGULAR: '交易中', PRE: '盤前交易中', POST: '盤後交易中', OVERNIGHT: '夜盤時段（無免費報價）', CLOSED: '已收盤' };
   let st = q ? `${!tw && !isIdx && q.session ? SESL[q.session] : isOpenFor(c) ? '交易中' : '已收盤'}　${ds} ${q.time || ''}（${tw || isIdx ? '台北' : '交易所時間'}）${q.source === 'yahoo' && tw ? '　·Yahoo' : ''}` : '';
@@ -846,7 +850,7 @@ function feesOf(code, side, amount, qty = 1) {
   if (!isTW(code)) return { fee: 0, tax: 0 }; return { fee: Math.max(20, Math.round(amount * 0.001425)), tax: side === 'sell' ? Math.round(amount * (code.startsWith('0') ? 0.001 : 0.003)) : 0 }; }
 function renderTicket() {
   const el = $('#tabTrade'), c = state.code, t = state.ticket;
-  if (c === 't00' || c.startsWith('FX.') || c.startsWith('Y.')) { el.innerHTML = '<div class="empty">這個商品不能模擬交易，請選擇台股或美股個股</div>'; return; }
+  if (c === 't00' || c.startsWith('FX.') || c.startsWith('Y.') || isGL(c)) { el.innerHTML = `<div class="empty">${isGL(c) ? '其他股市暫不支援模擬交易' : '這個商品不能模擬交易'}，請選擇台股或美股個股</div>`; return; }
   const q = state.quotes[c];
   if (!t.price || t.code !== c) { t.price = q?.price ?? ''; t.code = c; t.unit = isTW(c) ? 1000 : 1; t.qty = 1; }
   if (!isTW(c)) t.unit = 1;
@@ -977,6 +981,7 @@ function renderFoot() {
   });
   const us = state.mkt === 'us', ses = us ? (Object.values(state.quotes).find((q) => isUS(q.code || '') && !q.code.includes('^'))?.session || 'CLOSED') : (twOpen() ? 'REGULAR' : 'CLOSED');
   const SES = { REGULAR: '交易中', PRE: '盤前交易', POST: '盤後交易', OVERNIGHT: '夜盤時段', CLOSED: '收盤' };
+  $$('[data-mkt-toggle]').forEach((el) => el.classList.toggle('live', ses === 'REGULAR')); // 交易中時滑塊上亮呼吸燈
   $('#mktStat').innerHTML = `<i class="${ses === 'REGULAR' ? 'open' : ses === 'PRE' || ses === 'POST' ? 'ext' : ''}"></i>${us ? '美股' : '台股'}${SES[ses]}`;
   $('#srcNote').textContent = Object.values(state.quotes).some((q) => q.source === 'yahoo' && isTW(q.code || '')) ? '⚠ 證交所 MIS 暫時連不上，台股報價改用 Yahoo（約延遲 20 分鐘）' : '';
 }
@@ -992,7 +997,7 @@ setInterval(() => {
 }, 1000);
 
 /* ---------- 搜尋 ---------- */
-let hl = 0, results = [], usTimer = null, searchSeq = 0;
+let hl = 0, results = [], usTimer = null, searchSeq = 0, searchMsg = '';
 function searchTW(qs) {
   qs = qs.trim().toLowerCase(); if (!qs) return [];
   const a = [], b = [];
@@ -1000,25 +1005,49 @@ function searchTW(qs) {
   a.sort((x, y) => x.code.length - y.code.length || x.code.localeCompare(y.code));
   return [...a, ...b].slice(0, 15);
 }
+// 本機中文名稱表（美股＋其他股市），打中文立刻有結果，不用等 Yahoo
+function searchZh(qs) {
+  qs = qs.trim().toLowerCase(); if (!qs) return [];
+  const out = [];
+  for (const [c, n] of Object.entries(ZH_NAME)) {
+    if (!(isUS(c) || isGL(c))) continue;
+    const nl = n.toLowerCase(), cl = showCode(c).toLowerCase();
+    if (nl.includes(qs) || cl.startsWith(qs)) out.push({ code: c, name: n, mkt: isUS(c) ? 'us' : 'gl', ex: isUS(c) ? '美股' : regionOf(c), r: (nl.startsWith(qs) || cl === qs ? 0 : 1) });
+  }
+  return out.sort((x, y) => x.r - y.r || x.name.length - y.name.length).slice(0, 12);
+}
+function mergeResults(...lists) { const seen = new Set(), out = []; lists.flat().forEach((s) => { if (s && !seen.has(s.code)) { seen.add(s.code); out.push(s); } }); return out.slice(0, 24); }
+const mktLabel = (s) => (s.mkt === 'us' ? s.ex || '美股' : s.mkt === 'gl' ? s.ex || '國際' : s.mkt === 'otc' ? '上櫃' : '上市');
 function renderDrop() {
   const dr = $('#searchDrop'), v = $('#searchInput').value.trim();
   if (!v) { dr.classList.remove('open'); return; }
-  dr.innerHTML = results.length ? results.map((s, i) => `<div class="sitem ${i === hl ? 'hl' : ''}" data-code="${esc(s.code)}" data-name="${esc(s.name)}"><span class="c">${esc(showCode(s.code))}</span><span class="n">${esc(s.name)}</span><span class="m">${s.mkt === 'us' ? esc(s.ex || '美股') : s.mkt === 'otc' ? '上櫃' : '上市'}</span><button class="add" data-add="${esc(s.code)}" title="加入自選">${state.watch.includes(s.code) ? '♥' : '+'}</button></div>`).join('') : '<div class="empty">搜尋中…</div>';
+  dr.innerHTML = results.length ? results.map((s, i) => `<div class="sitem ${i === hl ? 'hl' : ''}" data-code="${esc(s.code)}" data-name="${esc(s.name)}"><span class="c">${esc(showCode(s.code))}</span><span class="n">${esc(s.name)}</span><span class="m ${s.mkt === 'gl' ? 'gl' : ''}">${esc(mktLabel(s))}</span><button class="add" data-add="${esc(s.code)}" title="加入自選">${state.watch.includes(s.code) ? '♥' : '+'}</button></div>`).join('')
+    + (searchMsg ? `<div class="empty small">${searchMsg}</div>` : '') : `<div class="empty">${searchMsg || '找不到符合的股票'}</div>`;
   dr.classList.add('open');
 }
+// 一個搜尋框查全部市場：台股清單、中文名稱表先出，再補上 Yahoo（美股與日韓港歐等）的結果
 $('#searchInput').addEventListener('input', (e) => {
-  const v = e.target.value; results = state.mkt === 'tw' ? searchTW(v) : []; hl = 0; renderDrop(); clearTimeout(usTimer);
-  if (state.mkt === 'us' && v.trim()) {
-    const seq = ++searchSeq;
-    usTimer = setTimeout(async () => { try { const us = await api('/api/search?q=' + encodeURIComponent(v.trim())); if (seq !== searchSeq) return; results = us.slice(0, 20); renderDrop(); if (!results.length) $('#searchDrop').innerHTML = '<div class="empty">找不到符合的股票</div>'; } catch {} }, 250);
-  } else if (!results.length && v.trim()) $('#searchDrop').innerHTML = '<div class="empty">找不到符合的股票</div>';
+  const v = e.target.value.trim(), seq = ++searchSeq; clearTimeout(usTimer);
+  const tw = searchTW(v), zh = searchZh(v), local = state.mkt === 'tw' ? mergeResults(tw, zh) : mergeResults(zh, tw);
+  results = local; hl = 0;
+  const remote = v && /[a-z0-9]/i.test(v);
+  searchMsg = remote ? '搜尋其他市場中…' : ''; renderDrop();
+  if (!remote) return;
+  usTimer = setTimeout(async () => {
+    let r = [], err = false;
+    try { r = await api('/api/search?q=' + encodeURIComponent(v)); } catch { err = true; }
+    if (seq !== searchSeq) return;
+    results = state.mkt === 'tw' ? mergeResults(tw, zh, r) : mergeResults(zh, r, tw);
+    searchMsg = err ? (results.length ? '其他市場暫時查不到，請稍後再試' : '搜尋失敗，請稍後再試') : '';
+    renderDrop();
+  }, 220);
 });
 $('#searchInput').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { hl = Math.min(hl + 1, results.length - 1); renderDrop(); e.preventDefault(); }
   else if (e.key === 'ArrowUp') { hl = Math.max(hl - 1, 0); renderDrop(); e.preventDefault(); }
   else if (e.key === 'Enter') {
     const v = e.target.value.trim(); let s = results[hl];
-    if (!s && state.mkt === 'tw' && /^\d{4,6}[A-Z]?$/i.test(v)) s = { code: v.toUpperCase() }; else if (!s && state.mkt === 'us' && /^[a-z.\-]{1,6}$/i.test(v)) s = { code: 'US.' + v.toUpperCase() };
+    if (!s && /^[a-z0-9\-]{1,10}\.[a-z]{1,3}$/i.test(v)) s = { code: 'G.' + v.toUpperCase() }; else if (!s && /^\d{4,6}[A-Z]?$/i.test(v)) s = { code: v.toUpperCase() }; else if (!s && /^[a-z.\-]{1,6}$/i.test(v)) s = { code: 'US.' + v.toUpperCase() };
     if (s) { rememberName(s.code, s.name); selectCode(s.code); setView('chart'); closeDrop(); }
   } else if (e.key === 'Escape') closeDrop();
 });
@@ -1084,17 +1113,22 @@ function selectCode(code) {
   renderWatch(); renderSide(); loadKline(); refreshQuotes();
   if (state.sideTab === 'inst' && isTW(code)) loadInst(); if (state.sideTab === 'trade') renderTicket();
 }
+// 市場切換：白天台股（太陽）／晚上美股（月亮），滑塊在兩邊之間滑動
+const MKT_ICON = {
+  tw: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7L7 17M17 7l1.7-1.7"/></svg>',
+  us: '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>',
+};
 function renderMktSwitch() {
   const m = state.mkt;
-  const other = m === 'tw' ? '美股' : '台股';
   $$('[data-mkt-toggle]').forEach((el) => {
-    el.className = `mkt-btn ${m}${el.id === 'mktSwitchM' ? ' m-mkt' : ''}`;
-    el.innerHTML = `<span class="mk">${m === 'tw' ? '台' : '美'}</span><span class="sw" aria-hidden="true">⇄</span>${el.id === 'mktSwitch' ? `<span class="lb">${m === 'tw' ? '台股' : '美股'}</span>` : ''}`;
-    el.title = `目前是${m === 'tw' ? '台股' : '美股'}，點一下切換到${other}`;
+    const live = el.classList.contains('live');
+    el.className = `mkt-btn ${m}${el.id === 'mktSwitchM' ? ' m-mkt' : ''}${live ? ' live' : ''}`;
+    el.innerHTML = `<span class="mkt-track"><i class="mkt-thumb"><i class="mkt-live"></i></i>${['tw', 'us'].map((k) => `<b data-m="${k}">${MKT_ICON[k]}<em>${k === 'tw' ? '台' : '美'}</em></b>`).join('')}</span>`;
+    el.title = `目前是${m === 'tw' ? '台股' : '美股'}，點一下切換到${m === 'tw' ? '美股' : '台股'}`;
     el.setAttribute('aria-label', el.title);
   });
   document.body.dataset.mkt = m;
-  $('#searchInput').placeholder = m === 'tw' ? '台股代號或名稱：2330、台積電' : '美股代號或名稱：AAPL、nvidia';
+  $('#searchInput').placeholder = m === 'tw' ? '搜尋全球股票：2330、台積電、三星' : '搜尋全球股票：AAPL、輝達、豐田';
 }
 function switchMarket(m) {
   if (m === state.mkt) return;
@@ -1108,7 +1142,7 @@ function switchMarket(m) {
   setView(state.view);
   toast(`已切換到${m === 'tw' ? '台股' : '美股'}`);
 }
-$$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', () => { el.classList.add('spin'); setTimeout(() => el.classList.remove('spin'), 400); switchMarket(state.mkt === 'tw' ? 'us' : 'tw'); }));
+$$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', (e) => { const k = e.target.closest('[data-m]')?.dataset.m; switchMarket(k && k !== state.mkt ? k : state.mkt === 'tw' ? 'us' : 'tw'); }));
 
 function appInit() {
   applyTheme(); renderMktSwitch();
