@@ -493,33 +493,33 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 }
 
 /* 台美切換：單顆按鈕 */
-.mkt-btn { position: relative; flex: none; margin: 2px 0 14px; padding: 0; background: none; border: 0; cursor: pointer; }
-.mkt-track { position: relative; display: flex; flex-direction: column; width: 42px; height: 76px; padding: 3px; border-radius: 21px; background: var(--panel2); border: 1px solid var(--line2); box-shadow: inset 0 1px 3px rgba(0,0,0,.25); overflow: hidden; }
-.mkt-thumb { position: absolute; left: 3px; right: 3px; top: 3px; height: calc(50% - 3px); border-radius: 18px;
-  background: linear-gradient(155deg, #ffc456 0%, #ff7a3d 55%, #f0444f 100%); box-shadow: 0 2px 12px rgba(255,122,61,.55), inset 0 1px 0 rgba(255,255,255,.35);
-  transition: transform .5s cubic-bezier(.65,-0.35,.3,1.35), background .5s, box-shadow .5s; }
-.mkt-btn.us .mkt-thumb { transform: translateY(100%); background: linear-gradient(155deg, #9a8cff 0%, #5b6cff 55%, #2b4fd8 100%); box-shadow: 0 2px 12px rgba(91,108,255,.6), inset 0 1px 0 rgba(255,255,255,.3); }
-.mkt-track b { position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: var(--dim); transition: color .35s, transform .35s; }
-.mkt-track b svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
-.mkt-track b[data-m="us"] svg { fill: currentColor; stroke: none; }
-.mkt-track b em { font-style: normal; font-size: 11.5px; font-weight: 700; letter-spacing: .5px; }
-.mkt-btn:hover .mkt-track b { color: var(--text); }
-.mkt-btn.tw b[data-m="tw"], .mkt-btn.us b[data-m="us"] { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.25); }
-.mkt-btn:active .mkt-track b { transform: scale(.92); }
-.mkt-live { position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: #3dffa0; box-shadow: 0 0 6px #3dffa0; opacity: 0; transition: opacity .3s; }
-.mkt-btn.live .mkt-live { opacity: 1; animation: mktPulse 1.8s ease-in-out infinite; }
-@keyframes mktPulse { 50% { opacity: .35; box-shadow: 0 0 2px #3dffa0; } }
+.mkt-btn { position: relative; flex: none; display: flex; flex-direction: column; align-items: center; gap: 5px; margin: 2px 0 14px; padding: 0; background: none; border: 0; cursor: pointer; }
+.mkt-btn.tw { --mx: #d9a55c; } .mkt-btn.us { --mx: #6fb6f2; }
+.mx { position: relative; display: block; width: 40px; height: 40px; border-radius: 11px; overflow: hidden; box-shadow: 0 0 0 1px var(--line2); transition: box-shadow .3s; }
+.mx-ring { position: absolute; inset: -60%; background: conic-gradient(from 0deg, transparent 0 72%, color-mix(in srgb, var(--mx) 70%, transparent) 88%, transparent 100%); animation: mxSpin 5s linear infinite; }
+.mx-core { position: absolute; inset: 1px; border-radius: 10px; display: grid; place-items: center;
+  background: linear-gradient(transparent 50%, rgba(255,255,255,.025) 50%) 0 0 / 100% 3px, radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--mx) 14%, var(--panel2)), var(--panel2)); }
+.mx-code { font: 700 13px/1 "JetBrains Mono", Consolas, "SF Mono", monospace; letter-spacing: 1.5px; margin-left: 1.5px; color: var(--mx); text-shadow: 0 0 8px color-mix(in srgb, var(--mx) 45%, transparent); }
+.mx-scan { position: absolute; left: 0; right: 0; top: -40%; height: 40%; background: linear-gradient(transparent, color-mix(in srgb, var(--mx) 30%, transparent), transparent); opacity: 0; pointer-events: none; }
+.mkt-btn.switching .mx-scan { animation: mxScan .6s ease-out; }
+.mkt-btn.switching .mx-ring { animation-duration: .9s; }
+.mx-live { position: absolute; top: 4px; right: 4px; width: 4px; height: 4px; border-radius: 50%; background: #45d68f; opacity: 0; }
+.mkt-btn.live .mx-live { opacity: .9; animation: mxPulse 2.4s ease-in-out infinite; }
+.mx-sub { font-size: 10.5px; color: var(--muted); letter-spacing: .5px; }
+.mkt-btn:hover .mx { box-shadow: 0 0 0 1px color-mix(in srgb, var(--mx) 45%, transparent), 0 0 14px color-mix(in srgb, var(--mx) 18%, transparent); }
+.mkt-btn:active .mx { transform: scale(.95); }
+@keyframes mxSpin { to { transform: rotate(360deg); } }
+@keyframes mxScan { 0% { top: -40%; opacity: 1; } 100% { top: 100%; opacity: 0; } }
+@keyframes mxPulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .mx-ring { animation: none; } }
 .m-mkt { display: none; }
 @media (max-width: 820px) {
   .nav .mkt-btn { display: none; }
   .m-mkt { display: flex; margin: 0 2px 0 0; }
-  .m-mkt .mkt-track { flex-direction: row; width: 78px; height: 32px; border-radius: 16px; }
-  .m-mkt .mkt-thumb { top: 3px; bottom: 3px; height: auto; width: calc(50% - 3px); right: auto; border-radius: 13px; }
-  .m-mkt.us .mkt-thumb { transform: translateX(100%); }
-  .m-mkt .mkt-track b { flex-direction: row; gap: 3px; }
-  .m-mkt .mkt-track b svg { width: 13px; height: 13px; }
-  .m-mkt .mkt-live { top: 4px; right: 5px; width: 5px; height: 5px; }
+  .m-mkt .mx { width: 36px; height: 36px; border-radius: 10px; }
+  .m-mkt .mx-code { font-size: 12px; }
   body[data-mpage="detail"] .m-mkt { display: none; }
+}
 }
 }
 

@@ -269,7 +269,7 @@ function renderMain() {
     const last = closes[closes.length - 1], base = state.prev ?? closes[0], col = last >= base ? UP : DOWN;
     primary = mainChart.addAreaSeries({ lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
     mainSeries.push(primary);
-    const data = bars.map((b) => (inRegular(b.t) ? { time: toTime(b.t), value: b.c } : { time: toTime(b.t), value: b.c, lineColor: CT.ext, topColor: CT.ext + '22', bottomColor: CT.ext + '03' }));
+    const data = bars.map((b) => ({ time: toTime(b.t), value: b.c }));
     if (state.period === 'tick') {
       const end = state.sessionEnd && state.sessionEnd > bars[0].t && state.sessionEnd - bars[0].t < 86400 ? state.sessionEnd
         : Math.floor((bars[0].t + state.off) / 86400) * 86400 - state.off + 13.5 * 3600;
@@ -291,7 +291,6 @@ function renderMain() {
     mainSeries.push(primary);
     primary.setData(bars.map((b) => {
       const o = { time: toTime(b.t), open: b.o, high: b.h, low: b.l, close: b.c };
-      if (!inRegular(b.t)) { const c = (b.c >= b.o ? UP : DOWN) + '66'; Object.assign(o, { color: c, borderColor: c, wickColor: c }); } // 盤前盤後K棒半透明
       return o;
     }));
     state.overlays.forEach((k) => {
@@ -1113,17 +1112,13 @@ function selectCode(code) {
   renderWatch(); renderSide(); loadKline(); refreshQuotes();
   if (state.sideTab === 'inst' && isTW(code)) loadInst(); if (state.sideTab === 'trade') renderTicket();
 }
-// 市場切換：白天台股（太陽）／晚上美股（月亮），滑塊在兩邊之間滑動
-const MKT_ICON = {
-  tw: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M2.5 12h2.4M19.1 12h2.4M5.3 5.3l1.7 1.7M17 17l1.7 1.7M5.3 18.7L7 17M17 7l1.7-1.7"/></svg>',
-  us: '<svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>',
-};
+// 市場切換：單一按鈕，外框有一道緩慢繞行的細光，切換時代號亂碼解碼＋掃描線
 function renderMktSwitch() {
   const m = state.mkt;
   $$('[data-mkt-toggle]').forEach((el) => {
     const live = el.classList.contains('live');
     el.className = `mkt-btn ${m}${el.id === 'mktSwitchM' ? ' m-mkt' : ''}${live ? ' live' : ''}`;
-    el.innerHTML = `<span class="mkt-track"><i class="mkt-thumb"><i class="mkt-live"></i></i>${['tw', 'us'].map((k) => `<b data-m="${k}">${MKT_ICON[k]}<em>${k === 'tw' ? '台' : '美'}</em></b>`).join('')}</span>`;
+    el.innerHTML = `<span class="mx"><span class="mx-ring"></span><span class="mx-core"><span class="mx-code">${m === 'tw' ? 'TW' : 'US'}</span></span><span class="mx-scan"></span><i class="mx-live"></i></span>${el.id === 'mktSwitch' ? `<span class="mx-sub">${m === 'tw' ? '台股' : '美股'}</span>` : ''}`;
     el.title = `目前是${m === 'tw' ? '台股' : '美股'}，點一下切換到${m === 'tw' ? '美股' : '台股'}`;
     el.setAttribute('aria-label', el.title);
   });
@@ -1142,7 +1137,20 @@ function switchMarket(m) {
   setView(state.view);
   toast(`已切換到${m === 'tw' ? '台股' : '美股'}`);
 }
-$$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', (e) => { const k = e.target.closest('[data-m]')?.dataset.m; switchMarket(k && k !== state.mkt ? k : state.mkt === 'tw' ? 'us' : 'tw'); }));
+function mktScramble() {
+  const CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ0123456789#%&$', want = state.mkt === 'tw' ? 'TW' : 'US';
+  $$('[data-mkt-toggle]').forEach((el) => {
+    el.classList.remove('switching'); void el.offsetWidth; el.classList.add('switching');
+    clearTimeout(el._sw); el._sw = setTimeout(() => el.classList.remove('switching'), 700);
+    const code = el.querySelector('.mx-code'); if (!code) return;
+    let n = 0; clearInterval(el._sc);
+    el._sc = setInterval(() => {
+      n++; code.textContent = [...want].map((c, i) => (n > 6 + i * 3 ? c : CH[Math.floor(Math.random() * CH.length)])).join('');
+      if (n > 6 + want.length * 3) clearInterval(el._sc);
+    }, 38);
+  });
+}
+$$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', () => { switchMarket(state.mkt === 'tw' ? 'us' : 'tw'); mktScramble(); }));
 
 function appInit() {
   applyTheme(); renderMktSwitch();
