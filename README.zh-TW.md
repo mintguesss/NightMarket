@@ -1,6 +1,6 @@
 <img src="web/icons/icon-192.png" width="96" alt="NightMarket logo">
 
-# NightMarket 夜市 🏮
+# NightMarket 夜市 🌙
 
 [![CI](https://github.com/mintguesss/NightMarket/actions/workflows/ci.yml/badge.svg)](https://github.com/mintguesss/NightMarket/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/mintguesss/NightMarket)](https://github.com/mintguesss/NightMarket/releases) ![Python](https://img.shields.io/badge/python-3.10%2B-blue) ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen) [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 

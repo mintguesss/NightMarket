@@ -169,6 +169,56 @@ function ibars(items, fmt, opt = {}) { // 簡易長條圖：items = [{label, a, 
       <i class="${(x.a ?? 0) >= 0 ? 'pos' : 'neg'}" style="height:${(Math.abs(x.a ?? 0) / mx) * 100}%"></i></div><div class="ibar-l">${esc(x.label)}</div></div>`).join('')}</div>
     ${opt.legend ? `<div class="ilegend">${opt.legend}</div>` : ''}`;
 }
+// 個股數據分頁（概覽／財務／股利／公司）：資訊頁和右側「數據」欄共用
+function infoSections(d) {
+  const tw = d.market === 'tw', q = state.quotes[d.code], P = { ov: [], fin: [], div: [], co: [] };
+  let cur = 'ov'; const L = { push: (h) => P[cur].push(h) }, sec = (x) => { cur = x; };
+  sec('ov');
+  if (tw) {
+    const v = d.valuation || {}, r = d.revenue;
+    L.push(icard('關鍵數據', `<div class="stat-grid">
+      ${[['本益比', v.pe ? fmtP(v.pe) : '-'], ['殖利率', v.yield != null ? fmtP(v.yield) + '%' : '-'], ['股價淨值比', v.pb ? fmtP(v.pb) : '-'], ['現價', fmtP(q?.price)]].map(([k, x]) => `<div><span>${k}</span><b class="num">${x}</b></div>`).join('')}</div>
+      <div class="hint">資料日期 ${esc(v.date || '-')}（證交所／櫃買中心）</div>`));
+    if (r) L.push(icard(`月營收　<span class="muted small">${esc(r.month)}　${esc(r.industry || '')}</span>`, `<div class="stat-grid">
+      <div><span>當月營收</span><b class="num">${fmtVol(r.cur * 1000)}</b></div>
+      <div><span>月增率</span><b class="num ${cls(r.mom)}">${sign(r.mom)}${fmtP(r.mom)}%</b></div>
+      <div><span>年增率</span><b class="num ${cls(r.yoy)}">${sign(r.yoy)}${fmtP(r.yoy)}%</b></div>
+      <div><span>今年累計</span><b class="num">${fmtVol(r.ytd * 1000)}</b></div>
+      <div><span>累計年增</span><b class="num ${cls(r.ytdYoy)}">${sign(r.ytdYoy)}${fmtP(r.ytdYoy)}%</b></div>
+      <div><span>去年同月</span><b class="num">${fmtVol(r.lastYear * 1000)}</b></div></div>
+      ${r.note && r.note !== '-' ? `<div class="hint">公司說明：${esc(r.note)}</div>` : ''}`));
+  } else {
+    const st = d.stats || [], grid = (rows) => `<div class="stat-grid">${rows.filter(([, v]) => v != null && v !== 'None – None' && v !== ' – ').map(([k, v]) => `<div><span>${esc(k)}</span><b class="num">${esc(v)}</b></div>`).join('')}</div>`;
+    L.push(icard('關鍵數據', [['估值', st.slice(0, 8)], ['獲利能力', st.slice(8, 14)], ['財務狀況', st.slice(14)]]
+      .filter(([, r]) => r.some(([, v]) => v != null)).map(([h, r]) => `<div class="stat-group"><div class="stat-group-h">${h}</div>${grid(r)}</div>`).join('')));
+    const a = d.analyst || {};
+    if (a.target) {
+      const pos = a.high > a.low ? Math.min(100, Math.max(0, ((a.price - a.low) / (a.high - a.low)) * 100)) : 50, up = ((a.target - a.price) / a.price) * 100;
+      const REC = { strong_buy: '強力買進', buy: '買進', hold: '持有', underperform: '表現落後', sell: '賣出' };
+      L.push(icard('分析師目標價', `<div class="stat-grid"><div><span>平均目標價</span><b class="num">${fmtP(a.target)}</b></div><div><span>距現價</span><b class="num ${cls(up)}">${sign(up)}${up.toFixed(1)}%</b></div><div><span>評等</span><b>${esc(REC[a.rec] || a.rec || '-')}</b></div><div><span>分析師人數</span><b class="num">${a.count ?? '-'}</b></div></div>
+        <div class="trange"><span class="num">${fmtP(a.low)}</span><div class="trange-bar"><i style="left:${pos}%"></i></div><span class="num">${fmtP(a.high)}</span></div><div class="hint">白點是目前股價在目標價區間（最低～最高）的位置</div>`));
+    }
+    if ((d.events || []).some(([, v]) => v)) L.push(icard('重要日期', kvTable(d.events)));
+  }
+  sec('fin');
+  if ((d.eps || []).length) L.push(icard('每季 EPS（實際 vs 預估）', ibars(d.eps.map((e) => ({ label: e.q, a: e.actual, b: e.estimate })), (v) => fmtP(v), { bLabel: '預估', legend: '<i class="pos"></i>實際　<i class="est"></i>市場預估' })));
+  if ((d.financials || []).length) L.push(icard(`年度營收與淨利　<span class="muted small">${tw ? '新台幣' : '美元'}</span>`, ibars(d.financials.map((f) => ({ label: String(f.year), a: f.revenue, b: f.earnings })), fmtVol, { legend: '<i class="pos"></i>營收　<i class="est"></i>淨利' })));
+  sec('div');
+  if ((d.dividends || []).length) {
+    const byYear = {}; d.dividends.forEach((x) => { const y = x.date.slice(0, 4); byYear[y] = (byYear[y] || 0) + x.amount; });
+    const years = Object.keys(byYear).sort().slice(-8), l = d.dividends.slice(0, 12);
+    let rows = ''; for (let i = 0; i < l.length; i += 2) rows += `<tr><td class="l num">${l[i].date}</td><td class="num">${fmtP(l[i].amount, 3)}</td><td class="l num">${l[i + 1]?.date || ''}</td><td class="num">${l[i + 1] ? fmtP(l[i + 1].amount, 3) : ''}</td></tr>`;
+    L.push(icard('股利歷史（現金，每年合計）', ibars(years.map((y) => ({ label: y, a: byYear[y] })), (v) => fmtP(v, v < 10 ? 2 : 1)) +
+      `<table class="tbl mini"><thead><tr><th class="l">除息日</th><th>每股股利</th><th class="l">除息日</th><th>每股股利</th></tr></thead><tbody>${rows}</tbody></table>`));
+  }
+  sec('co');
+  if (tw) L.push(icard('重大訊息（近期）', (d.announcements || []).length ? d.announcements.map((a) => `<details class="ann"><summary><span class="muted num">${esc(a.date)} ${a.time.slice(0, 2)}:${a.time.slice(2, 4)}</span>　${esc(a.title)}</summary><pre>${esc(a.desc)}</pre></details>`).join('') : '<div class="empty" style="padding:10px">最近幾天沒有重大訊息</div>'));
+  L.push(icard('公司資料', kvTable(d.profile || []) + (d.officers?.length ? `<div class="sub-h">主要經營團隊</div>${kvTable(d.officers)}` : '') + (d.summary ? `<div class="sub-h">業務簡介</div>${d.summary_zh ? `<p class="summary">${esc(d.summary_zh)}</p><details class="orig-sum"><summary>英文原文</summary><p class="summary">${esc(d.summary)}</p></details>` : `<p class="summary">${esc(d.summary)}</p>`}` : '')));
+  if (!P.div.length) P.div.push(icard('股利歷史', '<div class="empty" style="padding:10px">沒有配息紀錄</div>'));
+  if (!P.fin.length) P.fin.push(icard('財務', '<div class="empty" style="padding:10px">沒有財務資料</div>'));
+  const TABS = [['ov', '概覽'], ['fin', '財務'], ['div', '股利'], ['co', tw ? '公司與公告' : '公司資料']];
+  return { P, TABS };
+}
 PAGES.news = {
   async load(force) {
     const code = state.code, idx = code === 't00' || code.includes('^') || code.startsWith('Y.') || code.startsWith('FX.');
@@ -186,52 +236,7 @@ PAGES.news = {
   },
   render(d) {
     // 依分頁收集卡片：概覽／財務／股利／公司；右欄固定放新聞
-    const tw = d.market === 'tw', q = state.quotes[d.code], P = { ov: [], fin: [], div: [], co: [] }, R = [];
-    const L = { push: (h) => P[this._sec || 'ov'].push(h) }, sec = (s) => { this._sec = s; };
-    sec('ov');
-    if (tw) {
-      const v = d.valuation || {}, r = d.revenue;
-      L.push(icard('關鍵數據', `<div class="stat-grid">
-        ${[['本益比', v.pe ? fmtP(v.pe) : '-'], ['殖利率', v.yield != null ? fmtP(v.yield) + '%' : '-'], ['股價淨值比', v.pb ? fmtP(v.pb) : '-'], ['現價', fmtP(q?.price)]].map(([k, x]) => `<div><span>${k}</span><b class="num">${x}</b></div>`).join('')}</div>
-        <div class="hint">資料日期 ${esc(v.date || '-')}（證交所／櫃買中心）</div>`));
-      if (r) L.push(icard(`月營收　<span class="muted small">${esc(r.month)}　${esc(r.industry || '')}</span>`, `<div class="stat-grid">
-        <div><span>當月營收</span><b class="num">${fmtVol(r.cur * 1000)}</b></div>
-        <div><span>月增率</span><b class="num ${cls(r.mom)}">${sign(r.mom)}${fmtP(r.mom)}%</b></div>
-        <div><span>年增率</span><b class="num ${cls(r.yoy)}">${sign(r.yoy)}${fmtP(r.yoy)}%</b></div>
-        <div><span>今年累計</span><b class="num">${fmtVol(r.ytd * 1000)}</b></div>
-        <div><span>累計年增</span><b class="num ${cls(r.ytdYoy)}">${sign(r.ytdYoy)}${fmtP(r.ytdYoy)}%</b></div>
-        <div><span>去年同月</span><b class="num">${fmtVol(r.lastYear * 1000)}</b></div></div>
-        ${r.note && r.note !== '-' ? `<div class="hint">公司說明：${esc(r.note)}</div>` : ''}`));
-    } else {
-      const st = d.stats || [], grid = (rows) => `<div class="stat-grid">${rows.filter(([, v]) => v != null && v !== 'None – None' && v !== ' – ').map(([k, v]) => `<div><span>${esc(k)}</span><b class="num">${esc(v)}</b></div>`).join('')}</div>`;
-      L.push(icard('關鍵數據', [['估值', st.slice(0, 8)], ['獲利能力', st.slice(8, 14)], ['財務狀況', st.slice(14)]]
-        .filter(([, r]) => r.some(([, v]) => v != null)).map(([h, r]) => `<div class="stat-group"><div class="stat-group-h">${h}</div>${grid(r)}</div>`).join('')));
-      const a = d.analyst || {};
-      if (a.target) {
-        const pos = a.high > a.low ? Math.min(100, Math.max(0, ((a.price - a.low) / (a.high - a.low)) * 100)) : 50, up = ((a.target - a.price) / a.price) * 100;
-        const REC = { strong_buy: '強力買進', buy: '買進', hold: '持有', underperform: '表現落後', sell: '賣出' };
-        L.push(icard('分析師目標價', `<div class="stat-grid"><div><span>平均目標價</span><b class="num">${fmtP(a.target)}</b></div><div><span>距現價</span><b class="num ${cls(up)}">${sign(up)}${up.toFixed(1)}%</b></div><div><span>評等</span><b>${esc(REC[a.rec] || a.rec || '-')}</b></div><div><span>分析師人數</span><b class="num">${a.count ?? '-'}</b></div></div>
-          <div class="trange"><span class="num">${fmtP(a.low)}</span><div class="trange-bar"><i style="left:${pos}%"></i></div><span class="num">${fmtP(a.high)}</span></div><div class="hint">白點是目前股價在目標價區間（最低～最高）的位置</div>`));
-      }
-      if ((d.events || []).some(([, v]) => v)) L.push(icard('重要日期', kvTable(d.events)));
-    }
-    sec('fin');
-    if ((d.eps || []).length) L.push(icard('每季 EPS（實際 vs 預估）', ibars(d.eps.map((e) => ({ label: e.q, a: e.actual, b: e.estimate })), (v) => fmtP(v), { bLabel: '預估', legend: '<i class="pos"></i>實際　<i class="est"></i>市場預估' })));
-    if ((d.financials || []).length) L.push(icard(`年度營收與淨利　<span class="muted small">${tw ? '新台幣' : '美元'}</span>`, ibars(d.financials.map((f) => ({ label: String(f.year), a: f.revenue, b: f.earnings })), fmtVol, { legend: '<i class="pos"></i>營收　<i class="est"></i>淨利' })));
-    sec('div');
-    if ((d.dividends || []).length) {
-      const byYear = {}; d.dividends.forEach((x) => { const y = x.date.slice(0, 4); byYear[y] = (byYear[y] || 0) + x.amount; });
-      const years = Object.keys(byYear).sort().slice(-8), l = d.dividends.slice(0, 12);
-      let rows = ''; for (let i = 0; i < l.length; i += 2) rows += `<tr><td class="l num">${l[i].date}</td><td class="num">${fmtP(l[i].amount, 3)}</td><td class="l num">${l[i + 1]?.date || ''}</td><td class="num">${l[i + 1] ? fmtP(l[i + 1].amount, 3) : ''}</td></tr>`;
-      L.push(icard('股利歷史（現金，每年合計）', ibars(years.map((y) => ({ label: y, a: byYear[y] })), (v) => fmtP(v, v < 10 ? 2 : 1)) +
-        `<table class="tbl mini"><thead><tr><th class="l">除息日</th><th>每股股利</th><th class="l">除息日</th><th>每股股利</th></tr></thead><tbody>${rows}</tbody></table>`));
-    }
-    sec('co');
-    if (tw) L.push(icard('重大訊息（近期）', (d.announcements || []).length ? d.announcements.map((a) => `<details class="ann"><summary><span class="muted num">${esc(a.date)} ${a.time.slice(0, 2)}:${a.time.slice(2, 4)}</span>　${esc(a.title)}</summary><pre>${esc(a.desc)}</pre></details>`).join('') : '<div class="empty" style="padding:10px">最近幾天沒有重大訊息</div>'));
-    L.push(icard('公司資料', kvTable(d.profile || []) + (d.officers?.length ? `<div class="sub-h">主要經營團隊</div>${kvTable(d.officers)}` : '') + (d.summary ? `<div class="sub-h">業務簡介</div>${d.summary_zh ? `<p class="summary">${esc(d.summary_zh)}</p><details class="orig-sum"><summary>英文原文</summary><p class="summary">${esc(d.summary)}</p></details>` : `<p class="summary">${esc(d.summary)}</p>`}` : '')));
-    if (!P.div.length) P.div.push(icard('股利歷史', '<div class="empty" style="padding:10px">沒有配息紀錄</div>'));
-    if (!P.fin.length) P.fin.push(icard('財務', '<div class="empty" style="padding:10px">沒有財務資料</div>'));
-    const TABS = [['ov', '概覽'], ['fin', '財務'], ['div', '股利'], ['co', tw ? '公司與公告' : '公司資料']];
+    const tw = d.market === 'tw', R = [], { P, TABS } = infoSections(d);
     if (!TABS.some(([k]) => k === infoState.tab)) infoState.tab = 'ov';
     const nNews = (d.news || []).length;
     const newsTabs = `<div class="itabs" id="infoNewsTabs"><button data-nt="stock" class="${infoState.ntab !== 'mkt' ? 'on' : ''}">個股新聞 <span class="muted small">${nNews}</span></button><button data-nt="mkt" class="${infoState.ntab === 'mkt' ? 'on' : ''}">市場快訊</button></div>`;

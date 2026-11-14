@@ -478,7 +478,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 @media (max-width: 820px) {
   .rail { display: none; }
   body[data-mpage="detail"] #spQuote { display: contents; }
-  body[data-mpage="detail"] #spInfo, body[data-mpage="detail"] #spChips, body[data-mpage="detail"] #spMemo { display: none !important; }
+  body[data-mpage="detail"] #spInfo, body[data-mpage="detail"] #spData, body[data-mpage="detail"] #spOpt, body[data-mpage="detail"] #spChips, body[data-mpage="detail"] #spMemo { display: none !important; }
   .cal-side { display: none; }
   .week { grid-template-columns: repeat(7, 78vw); }
 }
@@ -814,3 +814,19 @@ html[data-theme="light"] #loading { background: rgba(255,255,255,.6); }
   html[data-theme="light"] .nav { background: rgba(255, 255, 255, .94); }
   html[data-theme="light"] .foot { background: #fff; }
 }
+
+/* ---------- 右側欄：數據、期權 ---------- */
+.sp-cards { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+.sp-cards .icard-h { padding: 9px 12px; font-size: 13.5px; }
+.sp-cards .icard-b { padding: 10px 12px; }
+.sp-cards .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 12px; }
+.sp-cards .stat-grid b { font-size: 14.5px; }
+.sp-cards .kv th { width: 84px; padding-right: 8px; }
+.sp-cards .kv td { word-break: break-word; }
+.sp-cards .ibars { overflow-x: auto; }
+.sp-optbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.sp-optbar select { flex: 1; min-width: 0; }
+.sotbl { width: 100%; }
+.sotbl td, .sotbl th { padding: 6px 6px; font-size: 12.5px; }
+.sotbl td.small { font-size: 11px; }
+.sotbl thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; }

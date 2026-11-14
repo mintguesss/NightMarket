@@ -1,6 +1,6 @@
-/* 右側欄：最右邊的圖示選單切換「行情／資訊／籌碼／下單／筆記」 */
+/* 右側欄：最右邊的圖示選單切換「行情／資訊／數據／期權／籌碼／下單／筆記」 */
 (() => {
-  const P = { quote: '#spQuote', info: '#spInfo', chips: '#spChips', memo: '#spMemo' };
+  const P = { quote: '#spQuote', info: '#spInfo', data: '#spData', opt: '#spOpt', chips: '#spChips', memo: '#spMemo' };
   let cur = store.get('tw.sidePanel', 'quote');
   if (cur === 'trade') cur = 'quote';
   const infoCache = {}; // code -> /api/info
@@ -17,6 +17,8 @@
   function refresh() {
     if (state.layout.noRight) return;
     if (cur === 'info') renderInfo();
+    if (cur === 'data') renderData();
+    if (cur === 'opt') loadOpt(true);
     if (cur === 'chips') loadChips();
     if (cur === 'memo') renderMemo();
   }
@@ -88,6 +90,71 @@
   }
   $('#spInfoTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-it]'); if (b) { infoTab = b.dataset.it; renderInfo(); } });
   $('#spInfoFull').addEventListener('click', () => setView('news'));
+
+  /* ---------- 數據（原本左邊的資訊頁：概覽／財務／股利／公司） ---------- */
+  let dataTab = 'ov';
+  async function renderData() {
+    const code = state.code, body = $('#spDataBody');
+    $('#spDataName').textContent = nameOf(code);
+    if (isIdx(code)) { $('#spDataTabs').innerHTML = ''; body.innerHTML = '<div class="empty">指數沒有個股數據，請先選一檔個股</div>'; return; }
+    if (!body.dataset.code || body.dataset.code !== code) body.innerHTML = '<div class="empty">載入中…</div>';
+    let d; try { d = await getInfo(code); } catch (e) { body.innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; return; }
+    if (state.code !== code || cur !== 'data') return;
+    const { P: sec, TABS } = infoSections(d);
+    if (!TABS.some(([k]) => k === dataTab)) dataTab = 'ov';
+    $('#spDataTabs').innerHTML = TABS.map(([k, n]) => `<button data-dt="${k}" class="${k === dataTab ? 'active' : ''}">${n}</button>`).join('');
+    body.dataset.code = code;
+    body.innerHTML = `<div class="sp-cards">${sec[dataTab].join('')}</div>`;
+  }
+  $('#spDataTabs').addEventListener('click', (e) => { const b = e.target.closest('[data-dt]'); if (b) { dataTab = b.dataset.dt; renderData(); } });
+  $('#spDataFull').addEventListener('click', () => setView('news'));
+
+  /* ---------- 期權（精簡 T 字報價，點價格可模擬下單） ---------- */
+  const opt = { und: null, exp: {}, data: null, t: 0 };
+  function optUnderlying(code) {
+    if (isTW(code) || code === 't00') return 'TXO';
+    if (isUS(code) && !code.includes('^')) return 'US.' + showCode(code);
+    return null;
+  }
+  async function loadOpt(first) {
+    const und = optUnderlying(state.code), body = $('#spOptBody');
+    $('#spOptName').textContent = und === 'TXO' ? '台指選擇權' : und ? showCode(state.code) : '';
+    if (!und) { body.innerHTML = '<div class="empty">這檔沒有期權報價<br><span class="small">台股顯示台指選擇權；美股個股與 ETF 顯示自己的期權</span></div>'; $('#spOptExp').innerHTML = ''; $('#spOptSpot').textContent = ''; return; }
+    if (und !== opt.und) { opt.und = und; opt.data = null; body.innerHTML = '<div class="empty">載入期權報價…</div>'; first = true; }
+    const exp = opt.exp[und] || '';
+    try {
+      const d = await api(`/api/options?u=${encodeURIComponent(und)}${exp ? '&exp=' + encodeURIComponent(exp) : ''}`);
+      if (opt.und !== und || cur !== 'opt') return;
+      opt.data = d; opt.t = Date.now(); if (!exp && d.expiry) opt.exp[und] = d.expiry;
+      renderOpt(first);
+    } catch (e) { if (opt.und === und) body.innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; }
+  }
+  function renderOpt(scroll) {
+    const d = opt.data, tw = opt.und === 'TXO'; if (!d) return;
+    $('#spOptExp').innerHTML = (d.expiries || []).map((x) => `<option value="${esc(x.id)}" ${x.id === d.expiry ? 'selected' : ''}>${esc(x.label)}</option>`).join('');
+    $('#spOptSpot').innerHTML = `標的 <b class="num">${fmtP(d.spot, tw ? 0 : 2)}</b>`;
+    const rows = d.rows || [], spot = d.spot;
+    if (!rows.length) { $('#spOptBody').innerHTML = '<div class="empty">沒有資料</div>'; return; }
+    const atmI = rows.reduce((bi, r, i) => (Math.abs(r.strike - spot) < Math.abs(rows[bi].strike - spot) ? i : bi), 0);
+    const view = rows.slice(Math.max(0, atmI - 10), atmI + 11), dp = tw ? 0 : 2;
+    const expLbl = $('#spOptExp').selectedOptions[0]?.text || d.expiry || '';
+    const cell = (x, r, side) => {
+      if (!x || !x.id) return '<td></td><td></td>';
+      const chg = x.chg ?? (x.last && x.ref ? x.last - x.ref : null), oc = (tw ? 'OPT.TW:' : 'OPT.US:') + x.id;
+      const lbl = `${tw ? '台指選 ' + expLbl : d.underlying.replace('US.', '') + ' ' + expLbl} ${fmtP(r.strike, dp)} ${side === 'call' ? (tw ? '買權' : 'Call') : (tw ? '賣權' : 'Put')}`;
+      const px = `<td class="num oc ${cls(chg)}" data-oc="${esc(oc)}" data-ol="${esc(lbl)}" data-op="${x.ask || x.last || ''}" data-bid="${x.bid ?? ''}" data-ask="${x.ask ?? ''}" title="買 ${fmtP(x.bid)}／賣 ${fmtP(x.ask)}　未平倉 ${x.oi ?? '-'}">${x.last ? fmtP(x.last) : '<span class="muted">-</span>'}</td>`;
+      const ch = `<td class="num small ${cls(chg)}">${chg ? sign(chg) + fmtP(chg) : ''}</td>`;
+      return side === 'call' ? ch + px : px + ch;
+    };
+    $('#spOptBody').innerHTML = `<table class="tbl otbl sotbl"><thead><tr><th colspan="2" class="c cs">買權</th><th class="c">履約價</th><th colspan="2" class="c ps">賣權</th></tr></thead><tbody>
+      ${view.map((r) => `<tr class="${rows[atmI].strike === r.strike ? 'atm' : ''}">${cell(r.call, r, 'call')}<td class="k num">${fmtP(r.strike, dp)}</td>${cell(r.put, r, 'put')}</tr>`).join('')}</tbody></table>
+      <div class="hint" style="padding:8px 12px">${tw ? '台指選擇權（期交所 MIS 即時）' : 'Yahoo Finance，可能延遲 15 分鐘'}。點成交價可模擬下單。</div>`;
+    if (scroll) setTimeout(() => $('#spOptBody tr.atm')?.scrollIntoView({ block: 'center' }), 30);
+  }
+  $('#spOptExp').addEventListener('change', (e) => { if (opt.und) { opt.exp[opt.und] = e.target.value; $('#spOptBody').innerHTML = '<div class="empty">載入期權報價…</div>'; loadOpt(true); } });
+  $('#spOptBody').addEventListener('click', (e) => { const td = e.target.closest('[data-oc]'); if (td) optOrder(td.dataset.oc, td.dataset.ol, 'buy', +td.dataset.op || null, +td.dataset.bid || null, +td.dataset.ask || null); });
+  $('#spOptFull').addEventListener('click', () => { if (opt.und && opt.und !== 'TXO') { optState.sym = opt.und.replace('US.', ''); optState.exp.us = ''; } setView('options'); });
+  setInterval(() => { if (cur === 'opt' && !state.layout.noRight && !document.hidden && Date.now() - opt.t > 15000) loadOpt(false); }, 5000);
 
   /* ---------- 籌碼分布（成本分布估算） ---------- */
   async function loadChips() {

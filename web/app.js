@@ -279,7 +279,9 @@ function renderMain() {
       if (i > 0 && Math.floor((b.t + state.off) / 86400) !== Math.floor((bars[i - 1].t + state.off) / 86400)) { pv = 0; vv = 0; }
       pv += ((b.h + b.l + b.c) / 3) * b.v; vv += b.v; return vv ? pv / vv : b.c;
     });
-    const l = { name: '均價', color: '#f5a524', vals: avg }; addLine(mainChart, mainSeries, l, bars); overlayInfo.push(l);
+    const l = { name: '均價', color: '#f5a524', vals: avg };
+    // 均價線不參與價格軸自動縮放：價格軸只依畫面上這段走勢的高低點調整，不會被遠處的均價線壓扁
+    addLine(mainChart, mainSeries, l, bars).applyOptions({ autoscaleInfoProvider: () => null }); overlayInfo.push(l);
   } else {
     primary = mainChart.addCandlestickSeries({ upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, priceFormat: pf });
     mainSeries.push(primary);
@@ -1110,7 +1112,6 @@ $$('[data-mkt-toggle]').forEach((el) => el.addEventListener('click', () => { el.
 
 function appInit() {
   applyTheme(); renderMktSwitch();
-  $('#langLbl').textContent = LANG === 'en' ? '中文' : 'EN';
   applyLayout(); syncToolbar(); renderIndBars(); renderDrawBar(); renderWatchTabs();
   draw.setItems(store.get('tw.draw.' + state.code, []));
   renderWatch(); renderSide(); renderFoot();
