@@ -432,9 +432,11 @@ async function loadKline(keepRange = false) {
     if (sessOn() && bars.length) {
       const m = sessResolved(), H = 3600, now = Date.now() / 1000;
       const reg = (d.regular || []).at(-1) || [d.sessionStart, d.sessionEnd];
-      const nightNow = state.quotes[code]?.session === 'OVERNIGHT' && now > reg[1];
+      // 夜盤：現在正在夜盤就看這一晚（當地 20:00 起 8 小時，週日晚上也算），否則看最近一個交易日開盤前那一晚
+      const nightNow = state.quotes[code]?.session === 'OVERNIGHT';
+      const lh = ((((now + state.off) / H) % 24) + 24) % 24, n0 = now - ((lh - 20 + 24) % 24) * H;
       const W = { all: [reg[0] - 5.5 * H, reg[1] + 4 * H], pre: [reg[0] - 5.5 * H, reg[0]], reg: [reg[0], reg[1]], post: [reg[1], reg[1] + 4 * H],
-        night: nightNow ? [reg[1] + 4 * H, reg[1] + 12 * H] : [reg[0] - 13.5 * H, reg[0] - 5.5 * H] }[m];
+        night: nightNow ? [n0, n0 + 8 * H] : [reg[0] - 13.5 * H, reg[0] - 5.5 * H] }[m];
       bars = bars.filter((b) => b.t >= W[0] && b.t < W[1]);
       state.tickWin = W; state.sessShown = m; state.sessionEnd = W[1];
       if (m !== 'all') state.regular = []; // 單一時段不用把盤前盤後畫暗

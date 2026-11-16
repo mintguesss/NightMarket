@@ -1518,32 +1518,55 @@ def alpaca_latest(codes):
     return {c: got[_alp_sym(c)] for c in codes if _alp_sym(c) in got}
 
 
+_alp_delayed = [False]  # 免費方案不能查最近 15 分鐘的 BOATS 分K
+
+
 def alpaca_night_bars(code, start, end):
     if not code.startswith("US."):
         return {"bars": [], "error": "只有美股有夜盤"}
     if not alpaca_on():
         return {"bars": [], "error": "nokey"}
-    start, end = int(start), min(int(end), int(time.time()) + 60)
+    now = int(time.time())
+    start, end = int(start), min(int(end), now + 60)
     if end <= start:
         return {"bars": []}
     iso = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     sym = _alp_sym(code)
 
-    def load():
+    def get(stop):
         bars, tok = [], None
         for _ in range(5):
-            prm = {"symbols": sym, "timeframe": "1Min", "start": iso(start), "end": iso(end), "limit": 10000, "sort": "asc"}
+            prm = {"symbols": sym, "timeframe": "1Min", "start": iso(start), "end": iso(stop), "limit": 10000, "sort": "asc", "feed": "boats"}
             if tok:
                 prm["page_token"] = tok
-            d = _alp_try("bars", "/v2/stocks/bars", prm)
-            for b in (d.get("bars") or {}).get(sym) or []:
-                bars.append({"t": _iso_ts(b["t"]), "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)})
+            d = _alp_get("/v2/stocks/bars", prm)
+            for x in (d.get("bars") or {}).get(sym) or []:
+                bars.append({"t": _iso_ts(x["t"]), "o": x["o"], "h": x["h"], "l": x["l"], "c": x["c"], "v": x.get("v", 0)})
             tok = d.get("next_page_token")
             if not tok:
                 break
-        return {"bars": bars, "feed": _alp_feed.get("bars")}
+        return bars
+
+    def load():
+        stop = min(end, now - 16 * 60) if _alp_delayed[0] else end
+        bars = []
+        if stop > start:
+            try:
+                bars = get(stop)
+            except AlpacaError as e:
+                if "recent" not in str(e) or _alp_delayed[0]:
+                    raise
+                _alp_delayed[0] = True
+                stop = min(end, now - 16 * 60)
+                bars = get(stop) if stop > start else []
+        if _alp_delayed[0] and end > now - 16 * 60:  # 最近 15 分鐘用最新成交補一根，之後由即時報價接著畫
+            x = alpaca_latest([code]).get(code)
+            if x and start <= x["ts"] < end and (not bars or x["ts"] >= bars[-1]["t"] + 60):
+                t = x["ts"] // 60 * 60
+                bars.append({"t": t, "o": x["price"], "h": x["price"], "l": x["price"], "c": x["price"], "v": 0})
+        return {"bars": bars, "delayed": _alp_delayed[0]}
     try:
-        return cached(f"alp:bars:{sym}:{start}:{end // 30}", 20, load)
+        return cached(f"alp:bars:{sym}:{start}:{end // 30}:{now // 30}", 20, load)
     except AlpacaError as e:
         return {"bars": [], "error": str(e)}
 
