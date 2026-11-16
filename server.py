@@ -156,9 +156,22 @@ def _levels(s):
 def parse_mis(m):
     asks, bids = _levels(m.get("a")), _levels(m.get("b"))
     askv, bidv = _levels(m.get("f")), _levels(m.get("g"))
+    # 價格 0 是「市價」委託、"-" 是沒有掛單，五檔裡都不算
+    ab = [(p, v) for p, v in zip(asks, askv) if p]
+    bb = [(p, v) for p, v in zip(bids, bidv) if p]
+    up, dn = _num(m.get("u")), _num(m.get("w"))
     last = _num(m.get("z"))
-    if last is None:  # 這幾秒沒有成交 -> 用前一筆/最佳買價/昨收
-        last = _num(m.get("pz")) or (bids[0] if bids else None) or _num(m.get("y"))
+    if last is None:  # 這幾秒沒有成交（跌停/漲停鎖住時 z 也會是 "-"）
+        last = _num((m.get("trade") or {}).get("z")) or _num(m.get("pz"))
+    if last is None:
+        if not bb and dn and (0.0 in asks[:1] or (ab and ab[0][0] == dn)):
+            last = dn  # 跌停鎖死：只剩賣單（市價賣）
+        elif not ab and up and (0.0 in bids[:1] or (bb and bb[0][0] == up)):
+            last = up  # 漲停鎖死
+        else:
+            last = (bb[0][0] if bb else None) or (ab[0][0] if ab else None) or _num(m.get("y"))
+    asks, askv = [p for p, _ in ab], [v for _, v in ab]
+    bids, bidv = [p for p, _ in bb], [v for _, v in bb]
     tl = _num(m.get("tlong"))
     return {
         "code": m.get("c"), "name": m.get("n"), "fullName": m.get("nf"), "mkt": m.get("ex"),
