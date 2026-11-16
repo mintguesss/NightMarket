@@ -45,6 +45,15 @@ class Drawings {
     this.ctx.setTransform(d, 0, 0, d, 0, 0); this.redraw();
   }
   setItems(items) { this.items = items || []; this.sel = -1; this.temp = null; this.redraw(); }
+  setAuto(items) { // 已經轉成手畫的就不再重複畫虛線
+    const have = new Set(this.items.map(autoKey));
+    this.auto = (items || []).filter((it) => !have.has(autoKey(it))); this.redraw();
+  }
+  toManual(list) { // 自動線轉成手畫線：之後可以選取、拖曳、刪除，也會存檔
+    list.forEach((it) => this.items.push({ type: it.type, color: it.color, points: it.points.map((p) => ({ ...p })), ...(it.tag ? { tag: it.tag } : {}) }));
+    const set = new Set(list); this.auto = this.auto.filter((it) => !set.has(it));
+    this.sel = list.length === 1 ? this.items.length - 1 : -1; this.commit();
+  }
   setTool(t) {
     this.tool = t; this.temp = null;
     const active = t !== 'cursor';
@@ -59,7 +68,8 @@ class Drawings {
 
   /* ---- 座標轉換 ---- */
   times() { const off = this.api.off(); return this.api.bars().map((b) => b.t + off); }
-  step(ts) { return ts.length > 1 ? (ts[ts.length - 1] - ts[0]) / (ts.length - 1) : 60; }
+  // 最後一根之後（未來區）用固定的週期長度換算，不用平均間隔，否則有新K棒或中間有休市缺口時線會整條位移
+  step(ts) { return this.api.step?.() || (ts.length > 1 ? (ts[ts.length - 1] - ts[0]) / (ts.length - 1) : 60); }
   logicalOf(time) {
     const ts = this.times(); const n = ts.length; if (!n) return null;
     if (time <= ts[0]) return (time - ts[0]) / this.step(ts);
@@ -79,18 +89,17 @@ class Drawings {
     const x = this.chart.timeScale().logicalToCoordinate(l), y = s.priceToCoordinate(p.price);
     return x == null || y == null ? null : { x, y };
   }
-  pt(e) {
+  pt(e, free = false) {
     const r = this.pane.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top, s = this.api.series();
     if (!s) return null;
     let l = this.chart.timeScale().coordinateToLogical(x), price = s.coordinateToPrice(y);
     if (l == null || price == null) return null;
-    if (this.api.magnet()) {
+    if (!free && this.api.magnet()) { // 磁吸只在很靠近開高低收時才貼過去，其他時候完全照滑鼠位置
       const b = this.api.bars()[Math.round(l)];
       if (b) {
-        l = Math.round(l);
         let best = null, bd = 1e9;
         [b.o, b.h, b.l, b.c].forEach((v) => { const d = Math.abs(s.priceToCoordinate(v) - y); if (d < bd) { bd = d; best = v; } });
-        if (bd < 30) price = best;
+        if (bd < 10) { price = best; l = Math.round(l); }
       }
     }
     return { time: this.timeOf(l), price, x, y };
@@ -126,7 +135,9 @@ class Drawings {
       if (hi >= 0) { this.startDrag(e, { idx: this.sel, handle: hi }); return; }
     }
     const hit = this.hitTest(mx, my);
-    if (hit >= 0) { this.sel = hit; this.startDrag(e, { idx: hit, handle: -1, start: this.pt(e), orig: this.items[hit].points.map((p) => ({ ...p })) }); this.redraw(); }
+    // 先點一下選取，選取後才能拖；避免拖動圖表時剛好按到線，把線一起拖走
+    if (hit >= 0 && hit === this.sel) { this.startDrag(e, { idx: hit, handle: -1, start: this.pt(e, true), orig: this.items[hit].points.map((p) => ({ ...p })) }); this.redraw(); }
+    else if (hit >= 0) { this.sel = hit; e.stopPropagation(); this.redraw(); }
     else if (this.sel >= 0) { this.sel = -1; this.redraw(); }
   }
   startDrag(e, d) {
@@ -137,7 +148,7 @@ class Drawings {
   move(e) {
     if (this.temp) { const p = this.pt(e); if (p) { this.temp.points[this.temp.points.length - 1] = p; this.redraw(); } return; }
     if (!this.drag) return;
-    const p = this.pt(e); if (!p) return;
+    const p = this.pt(e, this.drag.handle < 0); if (!p) return; // 整條平移時不磁吸
     const it = this.items[this.drag.idx]; this.moved = true;
     if (this.drag.handle >= 0) it.points[this.drag.handle] = { time: p.time, price: p.price };
     else {
@@ -152,15 +163,21 @@ class Drawings {
     if (this.moved) this.commit();
   }
   dbl(e) {
-    if (this.tool !== 'cursor' || this.sel < 0) return;
+    if (this.tool !== 'cursor' || this.hidden) return;
+    const r = this.pane.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+    if (this.hitTest(mx, my) < 0) { // 雙擊自動畫的虛線 -> 轉成手畫線
+      const ai = this.hitTest(mx, my, this.auto || []);
+      if (ai >= 0) { this.toManual([this.auto[ai]]); this.onConvert?.(1); e.stopPropagation(); return; }
+    }
+    if (this.sel < 0) return;
     const it = this.items[this.sel];
     if (it.type === 'text') { const t = prompt('修改文字：', it.text); if (t != null) { it.text = t; this.commit(); } e.stopPropagation(); }
   }
-  hitTest(mx, my) {
-    for (let i = this.items.length - 1; i >= 0; i--) {
-      const segs = this.segments(this.items[i]);
+  hitTest(mx, my, list = this.items) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const segs = this.segments(list[i]);
       for (const [a, b] of segs) if (distSeg(mx, my, a, b) < 6) return i;
-      const it = this.items[i];
+      const it = list[i];
       if (it.type === 'text') { const q = this.xy(it.points[0]); if (q && Math.abs(mx - q.x - 30) < 40 && Math.abs(my - q.y + 6) < 12) return i; }
     }
     return -1;
@@ -197,6 +214,7 @@ class Drawings {
     const g = this.ctx; if (!g) return;
     g.clearRect(0, 0, this.w, this.h);
     if (this.hidden) return;
+    (this.auto || []).forEach((it) => this.paint(g, it, false));
     const all = this.temp ? [...this.items, this.temp] : this.items;
     all.forEach((it, i) => this.paint(g, it, i === this.sel && it !== this.temp));
   }
@@ -204,6 +222,7 @@ class Drawings {
     const P = it.points.map((p) => this.xy(p)); if (P.some((p) => !p)) return;
     const col = it.color || '#f5a524';
     g.save(); g.strokeStyle = col; g.fillStyle = col; g.lineWidth = selected ? 2 : 1.3; g.font = '11px Segoe UI, Microsoft JhengHei';
+    if (it.auto) { g.setLineDash([6, 4]); g.globalAlpha = 0.9; } // 自動線用虛線，和手畫的分開
     const segs = this.segments(it);
     const s = this.api.series();
     if (it.type === 'rect' || it.type === 'measure') {
@@ -227,12 +246,76 @@ class Drawings {
       const pa = it.points[0].price, pb = it.points[1].price;
       FIB.forEach((f, k) => { const y = segs[k][0].y, pr = pb + (pa - pb) * f; g.fillText(`${(f * 100).toFixed(1)}%  ${pr.toFixed(2)}`, segs[k][0].x + 4, y - 3); });
     }
-    if (it.type === 'hline' || it.type === 'hray') label(g, it.points[0].price.toFixed(2), this.w - 40, P[0].y - 9, col);
+    if (it.type === 'hline' || it.type === 'hray') label(g, (it.tag ? it.tag + ' ' : '') + it.points[0].price.toFixed(2), this.w - (it.tag ? 52 : 40), P[0].y - 9, col);
     if (it.type === 'text') { g.font = '13px Microsoft JhengHei, sans-serif'; g.fillText(it.text || '', P[0].x, P[0].y); }
     if (selected || it === this.temp) P.forEach((p) => { g.beginPath(); g.arc(p.x, p.y, 4, 0, 7); g.fillStyle = '#0f1116'; g.fill(); g.strokeStyle = col; g.lineWidth = 1.5; g.stroke(); });
     g.restore();
   }
 }
+/* ---------- 自動畫線：只用已載入的 K 棒計算，不另外抓資料 ---------- */
+const AUTO_KINDS = [
+  { id: 'sr', name: '支撐／壓力', color: '#9aa7bd' },
+  { id: 'trend', name: '趨勢線', color: '#3d8bfd' },
+  { id: 'channel', name: '趨勢通道', color: '#d65bd6' },
+  { id: 'fib', name: '黃金分割（最近波段）', color: '#f5a524' },
+];
+function autoDraw(allBars, off, kinds) {
+  const N = 300, bars = allBars.slice(-N), n = bars.length, out = [];
+  if (n < 20 || !kinds.length) return out;
+  const T = (i) => bars[i].t + off, col = (id) => AUTO_KINDS.find((k) => k.id === id).color;
+  // 平均真實波幅當作「價格很接近」的容許誤差
+  let atr = 0; for (let i = 1; i < n; i++) atr += Math.max(bars[i].h - bars[i].l, Math.abs(bars[i].h - bars[i - 1].c), Math.abs(bars[i].l - bars[i - 1].c));
+  atr /= n - 1; const tol = Math.max(atr * 0.5, bars[n - 1].c * 0.001);
+  // 轉折點：左右 k 根內的最高／最低
+  const k = Math.max(2, Math.min(8, Math.round(n / 40))), PH = [], PL = [];
+  for (let i = k; i < n - k; i++) {
+    let hi = true, lo = true;
+    for (let j = i - k; j <= i + k; j++) { if (bars[j].h > bars[i].h) hi = false; if (bars[j].l < bars[i].l) lo = false; }
+    if (hi) PH.push(i); if (lo) PL.push(i);
+  }
+  const last = bars[n - 1].c;
+  if (kinds.includes('sr')) { // 價位相近的轉折點歸成一群，被碰越多次、越近期越重要
+    const pts = [...PH.map((i) => ({ i, p: bars[i].h })), ...PL.map((i) => ({ i, p: bars[i].l }))].sort((a, b) => a.p - b.p);
+    const cl = [];
+    for (const q of pts) { const c = cl[cl.length - 1]; if (c && q.p - c.avg <= tol) { c.m.push(q); c.avg = c.m.reduce((s, x) => s + x.p, 0) / c.m.length; } else cl.push({ m: [q], avg: q.p }); }
+    const sc = cl.filter((c) => c.m.length >= 2).map((c) => ({ ...c, s: c.m.reduce((s, x) => s + 0.5 + x.i / n, 0) }));
+    const above = sc.filter((c) => c.avg > last).sort((a, b) => b.s - a.s).slice(0, 2), below = sc.filter((c) => c.avg <= last).sort((a, b) => b.s - a.s).slice(0, 2);
+    [...above, ...below].forEach((c) => out.push({ type: 'hline', auto: true, color: col('sr'), tag: c.avg > last ? '壓力' : '支撐', points: [{ time: T(Math.min(...c.m.map((x) => x.i))), price: c.avg }] }));
+  }
+  // 趨勢線：兩個轉折點連線，之後的 K 棒收盤不能明顯穿破，碰到越多次越好
+  const bestLine = (P, up) => {
+    let best = null;
+    for (let a = 0; a < P.length; a++) for (let b = a + 1; b < P.length; b++) {
+      const i = P[a], j = P[b], pi = up ? bars[i].l : bars[i].h, pj = up ? bars[j].l : bars[j].h;
+      if (up ? pj <= pi : pj >= pi) continue;
+      const slope = (pj - pi) / (j - i); let touch = 0, bad = 0;
+      for (let x = i; x < n; x++) {
+        const y = pi + slope * (x - i), v = up ? bars[x].l : bars[x].h;
+        if (up ? bars[x].c < y - tol : bars[x].c > y + tol) bad++;
+        else if (Math.abs(v - y) <= tol) touch++;
+      }
+      if (bad > 1) continue;
+      const s = touch + (j / n) * 2 + (n - i) / n;
+      if (!best || s > best.s) best = { i, j, pi, slope, s, up };
+    }
+    return best;
+  };
+  const lines = [bestLine(PL, true), bestLine(PH, false)].filter(Boolean);
+  if (kinds.includes('trend')) lines.forEach((L) => out.push({ type: 'ray', auto: true, color: col('trend'), points: [{ time: T(L.i), price: L.pi }, { time: T(L.j), price: L.pi + L.slope * (L.j - L.i) }] }));
+  if (kinds.includes('channel') && lines.length) { // 取比較強的那條趨勢線，平行線貼著另一側最遠的點
+    const L = lines.sort((a, b) => b.s - a.s)[0]; let ex = L.i, d = 0;
+    for (let x = L.i; x < n; x++) { const y = L.pi + L.slope * (x - L.i), v = L.up ? bars[x].h - y : y - bars[x].l; if (v > d) { d = v; ex = x; } }
+    const e = n - 1;
+    out.push({ type: 'channel', auto: true, color: col('channel'), points: [{ time: T(L.i), price: L.pi }, { time: T(e), price: L.pi + L.slope * (e - L.i) }, { time: T(ex), price: L.up ? bars[ex].h : bars[ex].l }] });
+  }
+  if (kinds.includes('fib')) { // 最近一段大波段：區間最高與最低，0% 在比較近的那一端
+    let hi = 0, lo = 0; for (let i = 0; i < n; i++) { if (bars[i].h > bars[hi].h) hi = i; if (bars[i].l < bars[lo].l) lo = i; }
+    const [a, b] = hi < lo ? [{ i: hi, p: bars[hi].h }, { i: lo, p: bars[lo].l }] : [{ i: lo, p: bars[lo].l }, { i: hi, p: bars[hi].h }];
+    out.push({ type: 'fib', auto: true, color: col('fib'), points: [{ time: T(a.i), price: a.p }, { time: T(b.i), price: b.p }] });
+  }
+  return out;
+}
+const autoKey = (it) => it.type + ':' + it.points.map((p) => `${Math.round(p.time)}@${(+p.price).toFixed(4)}`).join('|');
 function distSeg(px, py, a, b) {
   const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
   const t = L ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / L)) : 0;

@@ -87,7 +87,8 @@ const state = {
   bars: [], prev: null, off: 8 * 3600, sessionEnd: null, lastVol: null,
   paper: null,
   ticket: { side: 'buy', type: 'limit', unit: 1000, price: '', qty: 1 },
-  magnet: store.get('tw.magnet', true),
+  magnet: store.get('tw.magnet2', false), // 預設關閉磁吸，畫線完全自由
+  autoKinds: store.get('tw.autoDraw', []),
   extHours: store.get('tw.extHours', true), regular: [], postEnd: null, sessMode: store.get('tw.sessMode', 'auto'), sessShown: null, tickWin: null,
 };
 const PER_MKT = new Set(['watch', 'groups']);
@@ -239,6 +240,7 @@ allCharts.forEach((c) => c.timeScale().subscribeVisibleLogicalRangeChange((r) =>
 
 const draw = new Drawings($('#paneMain'), mainChart, {
   series: () => primary, bars: () => state.bars, off: () => state.off, magnet: () => state.magnet,
+  step: () => { const P = PERIODS[state.period]; return P.agg || STEP_OF[P.interval] || { '1d': 86400, '1wk': 604800, '1mo': 2629800 }[P.interval] || 0; },
   save: (items) => store.set('tw.draw.' + state.code, items),
 });
 
@@ -460,7 +462,7 @@ async function loadKline(keepRange = false) {
     state.bars = sanitizeBars(bars, P.agg || STEP_OF[P.interval]); state.lastVol = q?.volume ?? null; bars = state.bars;
     if (!keepRange) allCharts.forEach((c) => c.priceScale('right').applyOptions({ autoScale: true })); // 換股或換週期時恢復自動縮放，避免價格軸被拖動後K棒跑出畫面
     state.prev = P.line ? (state.period === 'tick' ? q?.prev ?? d.prev : d.prev) : null;
-    rerender(keepRange);
+    rerender(keepRange); updateAuto();
     if (!keepRange) {
       if (P.line) mainChart.timeScale().fitContent();
       else { const n = bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); }
@@ -519,7 +521,8 @@ function editParams(kind, key) {
 }
 function renderDrawBar() {
   $('#drawBar').innerHTML = DRAW_TOOLS.map((t) => `<button data-tool="${t.id}" class="${draw.tool === t.id ? 'active' : ''}" title="${t.name}"><svg viewBox="0 0 24 24">${t.icon}</svg></button>`).join('') +
-    `<div class="dsep"></div>
+    `<button data-dact="auto" class="${state.autoKinds.length ? 'active' : ''}" title="自動畫線（可複選）"><svg viewBox="0 0 24 24"><path d="M4 20L14 10M15 3v3M15 12v3M18.5 6.5l-2 2M11.5 6.5l2 2M21 9h-3M12 9H9"/></svg></button>
+     <div class="dsep"></div>
      <button data-dact="color" title="線條顏色"><span class="swatch" style="background:${draw.color}"></span></button>
      <button data-dact="magnet" class="${state.magnet ? 'active' : ''}" title="磁吸（貼齊開高低收）"><svg viewBox="0 0 24 24"><path d="M6 3v8a6 6 0 0012 0V3M6 7h4M14 7h4"/></svg></button>
      <button data-dact="hide" class="${draw.hidden ? 'active' : ''}" title="隱藏/顯示畫線"><svg viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>${draw.hidden ? '<path d="M3 3l18 18"/>' : ''}</svg></button>
@@ -527,6 +530,29 @@ function renderDrawBar() {
      <button data-dact="clear" title="清除這檔所有畫線"><svg viewBox="0 0 24 24"><path d="M3 3l18 18M21 3L3 21"/></svg></button>`;
 }
 draw.onTool = () => renderDrawBar();
+draw.onConvert = () => toast('已轉成手畫線，可以拖曳調整');
+// 自動畫線：勾選要哪些（可複選），勾了就畫，全部取消就關掉
+function updateAuto() { draw.setAuto(state.autoKinds.length ? autoDraw(state.bars, state.off, state.autoKinds) : []); }
+function autoPop(btn) {
+  let p = $('#autoPop');
+  if (p) { p.remove(); return; }
+  p = document.createElement('div'); p.id = 'autoPop'; p.className = 'ctx-menu open auto-pop';
+  const paint = () => {
+    p.innerHTML = '<div class="auto-h">自動畫線</div>' + AUTO_KINDS.map((k) => `<label class="ctx-item"><input type="checkbox" data-k="${k.id}" ${state.autoKinds.includes(k.id) ? 'checked' : ''}><i style="color:${k.color}"></i>${k.name}</label>`).join('') +
+      `<div class="ctx-sep"></div><div class="ctx-item" data-all>${state.autoKinds.length === AUTO_KINDS.length ? '全部取消' : '全部勾選'}</div>
+      <div class="ctx-item ${draw.auto?.length ? '' : 'disabled'}" data-conv>全部轉成手畫線（${draw.auto?.length || 0} 條）</div>
+      <div class="auto-hint">虛線＝自動計算，換股或換週期會重算<br>雙擊某條虛線，可以單獨轉成手畫線再自己調整</div>`;
+  };
+  paint(); document.body.appendChild(p);
+  const r = ($('#drawBar [data-dact="auto"]') || btn).getBoundingClientRect(); p.style.left = r.right + 6 + 'px'; p.style.top = Math.min(r.top, innerHeight - p.offsetHeight - 8) + 'px';
+  const apply = () => { store.set('tw.autoDraw', state.autoKinds); updateAuto(); renderDrawBar(); paint(); };
+  p.addEventListener('change', (e) => { const k = e.target.dataset.k; if (!k) return; state.autoKinds = e.target.checked ? [...state.autoKinds, k] : state.autoKinds.filter((x) => x !== k); apply(); });
+  p.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (e.target.closest('[data-conv]')) { const n = draw.auto?.length || 0; if (n) { draw.toManual([...draw.auto]); toast(`已轉成 ${n} 條手畫線，可以拖曳調整`); paint(); } return; }
+    if (e.target.closest('[data-all]')) { state.autoKinds = state.autoKinds.length === AUTO_KINDS.length ? [] : AUTO_KINDS.map((k) => k.id); apply(); } });
+  setTimeout(() => document.addEventListener('click', function off(e) { if (!p.contains(e.target)) { p.remove(); document.removeEventListener('click', off); } }), 0);
+}
 $('#drawBar').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.tool) { draw.setTool(draw.tool === b.dataset.tool && b.dataset.tool !== 'cursor' ? 'cursor' : b.dataset.tool); return; }
@@ -535,7 +561,8 @@ $('#drawBar').addEventListener('click', (e) => {
     const i = (DRAW_COLORS.indexOf(draw.color) + 1) % DRAW_COLORS.length; draw.color = DRAW_COLORS[i];
     if (draw.sel >= 0) { draw.items[draw.sel].color = draw.color; draw.commit(); }
   }
-  if (a === 'magnet') { state.magnet = !state.magnet; save('magnet'); }
+  if (a === 'magnet') { state.magnet = !state.magnet; store.set('tw.magnet2', state.magnet); }
+  if (a === 'auto') { autoPop(b); return; }
   if (a === 'hide') { draw.hidden = !draw.hidden; draw.redraw(); }
   if (a === 'del') { if (draw.sel >= 0) draw.removeSelected(); else toast('先點選一條線'); }
   if (a === 'clear') { if (draw.items.length) confirmBox('清除畫線', `確定刪除 ${esc(nameOf(state.code))} 的 ${draw.items.length} 個畫線？`, '刪除', () => draw.clear()); }

@@ -112,6 +112,11 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .draw-bar button.active { color: var(--accent); background: rgba(245,165,36,.12); }
 .draw-bar .dsep { width: 22px; height: 1px; background: var(--line); margin: 4px 0; flex: none; }
 .draw-bar .swatch { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--dim); }
+.auto-pop { min-width: 210px; }
+.auto-pop .auto-h { padding: 6px 10px 4px; font-size: 12px; color: var(--muted); }
+.auto-pop input { accent-color: var(--accent); margin: 0; }
+.auto-pop label i { width: 14px; height: 0; border-top: 2px dashed currentColor; display: inline-block; }
+.auto-pop .auto-hint { padding: 4px 10px 6px; font-size: 11px; color: var(--dim); }
 .chart-wrap { flex: 1; position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .pane { position: relative; min-height: 0; }
 .pane-main { flex: 3; }
