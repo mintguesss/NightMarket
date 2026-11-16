@@ -374,7 +374,18 @@ def quotes(codes):
     for q in POOL.map(lambda c: _safe(yahoo_quote, c, None), other):
         if q:
             out[q["code"]] = q
+    night = [c for c, q in out.items() if q.get("session") == "OVERNIGHT" and c.startswith("US.") and "^" not in c]
+    if night and alpaca_on():
+        lt = alpaca_latest(night)
+        for c, x in lt.items():
+            q = out[c] = dict(out[c])  # 快取裡的物件不要直接改
+            if x["ts"] > (q.get("ts") or 0) and (not q.get("ext") or x["ts"] >= q["ext"].get("ts", 0)):
+                q["ext"] = {"price": x["price"], "label": "夜盤", "time": _fmt_local(x["ts"], -5 * 3600 if not _us_dst_now() else -4 * 3600), "ts": x["ts"], "night": True}
     return out
+
+
+def _us_dst_now():
+    return _us_dst(datetime.now(timezone.utc).replace(tzinfo=None))
 
 
 # ---------------- K 線 (Yahoo) ----------------
@@ -1429,6 +1440,142 @@ def config_set_notify(body):
     return {"ok": True, "msg": "推播設定已儲存"}
 
 
+# ---------------- Alpaca 夜盤資料（美東 20:00–04:00，Blue Ocean ATS） ----------------
+ALPACA_DATA = "https://data.alpaca.markets"
+_alp_feed = {}  # 記住哪個 feed 這個帳號能用：{"bars": "boats", "latest": "overnight"}
+
+
+def alpaca_keys():
+    a = config_get().get("alpaca") or {}
+    return (a.get("key") or "", a.get("secret") or "")
+
+
+def alpaca_on():
+    k, sec = alpaca_keys()
+    return bool(k and sec)
+
+
+def _alp_sym(code):
+    return code[3:].replace("-", ".")  # US.BRK-B -> BRK.B
+
+
+class AlpacaError(Exception):
+    pass
+
+
+def _alp_get(path, params):
+    k, sec = alpaca_keys()
+    if not (k and sec):
+        raise AlpacaError("尚未設定 Alpaca 金鑰")
+    url = ALPACA_DATA + path + "?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": sec, "Accept": "application/json", "User-Agent": UA})
+    try:
+        with urllib.request.urlopen(req, timeout=8, context=SSL_CTX) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            msg = json.loads(raw).get("message") or raw[:120]
+        except ValueError:
+            msg = ""
+        hint = {401: "金鑰不正確", 403: "這個帳號的方案沒有夜盤資料權限", 429: "請求太頻繁，稍後再試"}.get(e.code, "")
+        raise AlpacaError(f"HTTP {e.code} {hint} {msg}".strip()) from None
+
+
+def _alp_try(kind, path, params):
+    """依序試 boats / overnight 兩種 feed，第一個成功的記起來下次直接用。"""
+    feeds = [_alp_feed[kind]] if kind in _alp_feed else ["boats", "overnight"]
+    err = None
+    for f in feeds:
+        try:
+            d = _alp_get(path, dict(params, feed=f))
+            _alp_feed[kind] = f
+            return d
+        except AlpacaError as e:
+            err = e
+    _alp_feed.pop(kind, None)
+    raise err
+
+
+def _iso_ts(s):
+    return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
+
+
+def alpaca_latest(codes):
+    """美股代號 -> 最新一筆夜盤成交 {"price","ts"}。"""
+    syms = sorted({_alp_sym(c) for c in codes})
+    if not syms or not alpaca_on():
+        return {}
+
+    def load():
+        d = _alp_try("latest", "/v2/stocks/trades/latest", {"symbols": ",".join(syms)})
+        return {sym: {"price": t["p"], "ts": _iso_ts(t["t"])} for sym, t in (d.get("trades") or {}).items() if t.get("p")}
+    try:
+        got = cached("alp:last:" + ",".join(syms), 4, load)
+    except Exception as e:  # 金鑰錯、方案沒權限：報價照舊，不要讓整個報價失敗
+        print("[alpaca] latest:", e)
+        return {}
+    return {c: got[_alp_sym(c)] for c in codes if _alp_sym(c) in got}
+
+
+def alpaca_night_bars(code, start, end):
+    if not code.startswith("US."):
+        return {"bars": [], "error": "只有美股有夜盤"}
+    if not alpaca_on():
+        return {"bars": [], "error": "nokey"}
+    start, end = int(start), min(int(end), int(time.time()) + 60)
+    if end <= start:
+        return {"bars": []}
+    iso = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sym = _alp_sym(code)
+
+    def load():
+        bars, tok = [], None
+        for _ in range(5):
+            prm = {"symbols": sym, "timeframe": "1Min", "start": iso(start), "end": iso(end), "limit": 10000, "sort": "asc"}
+            if tok:
+                prm["page_token"] = tok
+            d = _alp_try("bars", "/v2/stocks/bars", prm)
+            for b in (d.get("bars") or {}).get(sym) or []:
+                bars.append({"t": _iso_ts(b["t"]), "o": b["o"], "h": b["h"], "l": b["l"], "c": b["c"], "v": b.get("v", 0)})
+            tok = d.get("next_page_token")
+            if not tok:
+                break
+        return {"bars": bars, "feed": _alp_feed.get("bars")}
+    try:
+        return cached(f"alp:bars:{sym}:{start}:{end // 30}", 20, load)
+    except AlpacaError as e:
+        return {"bars": [], "error": str(e)}
+
+
+def config_alpaca_public():
+    k, sec = alpaca_keys()
+    return {"key": (k[:4] + "…" + k[-4:]) if len(k) > 10 else ("已設定" if k else ""), "secret": "已設定" if sec else ""}
+
+
+def config_set_alpaca(body):
+    with _store_lock:
+        cfg = config_get()
+        a = cfg.setdefault("alpaca", {})
+        for k in ("key", "secret"):
+            v = body.get(k)
+            if v is not None and "…" not in str(v) and v != "已設定":
+                a[k] = str(v).strip()
+        _jsave(CONFIG_FILE, cfg)
+    _alp_feed.clear()
+    with _cache_lock:
+        for k in [k for k in _cache if k.startswith("alp:")]:
+            _cache.pop(k, None)
+    if not alpaca_on():
+        return {"ok": True, "msg": "已清除 Alpaca 金鑰"}
+    try:
+        d = _alp_try("latest", "/v2/stocks/trades/latest", {"symbols": "SPY"})
+        t = (d.get("trades") or {}).get("SPY") or {}
+        return {"ok": True, "msg": f"Alpaca 連線成功（{_alp_feed.get('latest')}，SPY 最新夜盤成交 {t.get('p', '--')}）"}
+    except AlpacaError as e:
+        return {"ok": False, "msg": "金鑰已儲存，但連線失敗：" + str(e)}
+
+
 def _post(url, data, headers=None, form=False):
     body = (urllib.parse.urlencode(data).encode() if form else
             data.encode("utf-8") if isinstance(data, str) else json.dumps(data).encode("utf-8"))
@@ -2069,6 +2216,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json({"operands": S.OPERANDS, "ops": S.OPS})
             elif u.path == "/api/config/notify":
                 self.send_json(config_public())
+            elif u.path == "/api/config/alpaca":
+                self.send_json(config_alpaca_public())
+            elif u.path == "/api/overnight":
+                self.send_json(alpaca_night_bars(q["code"], q["start"], q["end"]))
             elif u.path == "/api/heatmap":
                 self.send_json(heatmap(q.get("mkt", "tw")))
             elif u.path == "/api/calweek":
@@ -2109,6 +2260,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(screener(body))
             elif u.path == "/api/config/notify":
                 self.send_json(config_set_notify(body))
+            elif u.path == "/api/config/alpaca":
+                self.send_json(config_set_alpaca(body))
             elif u.path == "/api/notify/test":
                 r = push("測試推播", "NightMarket：推播設定成功 ✅", only=body.get("channel"))
                 self.send_json({"ok": bool(r) and all(v == "ok" for v in r.values()), "result": r or {"-": "沒有啟用中的管道"}})

@@ -120,6 +120,7 @@ The engine lives in [`strategy.py`](strategy.py) (standard library only) and can
 | US quotes, charts, extended hours | Yahoo Finance | < 1 s during market hours |
 | US options | Yahoo Finance | may be delayed |
 | Other markets (JP, KR, HK, EU…) | Yahoo Finance | mostly 15–20 min delay |
+| US overnight (8 pm–4 am ET) | [Alpaca](https://alpaca.markets) (Blue Ocean ATS) | optional — paste your own free API key in Settings → Overnight data |
 | Company data, revenue, dividends, institutional flows | TWSE / TPEx open data, Yahoo Finance | daily |
 | Earnings & economic calendar, US screener | Nasdaq | daily / live |
 | News | Yahoo, cnyes | — |

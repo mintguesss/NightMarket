@@ -449,3 +449,21 @@ async function notifyPanel() {
     toast(r.ok ? '✓ 測試推播已送出' : '失敗：' + Object.values(r.result || {}).join('、'), 5000);
   }));
 }
+
+/* ---------- 夜盤資料（Alpaca） ---------- */
+async function alpacaPanel() {
+  const c = await api('/api/config/alpaca').catch(() => ({}));
+  openModal('夜盤資料（Alpaca）', `
+    <div class="hint" style="margin:0 0 12px">Yahoo 沒有美股夜盤（美東 20:00–04:00，台北早上）的資料。填入 Alpaca 的免費金鑰後，分時切到「夜盤」就能看走勢，自選清單也會顯示夜盤價。</div>
+    <ol class="hint" style="margin:0 0 12px;padding-left:18px;line-height:1.7">
+      <li>到 <a href="https://alpaca.markets" target="_blank" rel="noopener">alpaca.markets</a> 註冊免費帳號（用 Paper Trading 就好，不用入金）</li>
+      <li>在後台首頁右側「API Keys」按 Generate，複製 Key 和 Secret</li>
+      <li>貼到下面並儲存</li></ol>
+    <div class="fld"><label>API Key ID</label><input id="alKey" value="${esc(c.key || '')}" placeholder="PK 開頭" autocomplete="off"></div>
+    <div class="fld"><label>Secret Key</label><input id="alSec" type="password" value="${esc(c.secret || '')}" placeholder="只會顯示一次，記得先複製" autocomplete="off"></div>
+    <div class="hint">金鑰只存在這台電腦的 config.json，不會上傳。要清除就把兩欄清空後儲存。</div>`,
+    [{ label: '取消' }, { label: '儲存並測試', act: async (m) => {
+      const r = await post('/api/config/alpaca', { key: m.querySelector('#alKey').value, secret: m.querySelector('#alSec').value });
+      toast(r.msg, 6000); if (r.ok && state.sessShown === 'night') loadKline();
+    } }]);
+}

@@ -109,6 +109,7 @@ python server.py
 | 美股報價、K 線、盤前盤後 | Yahoo Finance | 盤中延遲不到 1 秒 |
 | 美股選擇權 | Yahoo Finance | 可能延遲 15 分鐘 |
 | 其他股市（日韓港歐等） | Yahoo Finance | 多數延遲 15–20 分鐘 |
+| 美股夜盤（美東 20:00–04:00） | [Alpaca](https://alpaca.markets)（Blue Ocean ATS） | 選用，在「設定 → 夜盤資料」填入自己的免費金鑰 |
 | 新聞 | Yahoo 股市、鉅亨網 | — |
 | 英文新聞中文翻譯（可選） | Google 翻譯網頁端點 | — |
 | 台股公司資料、月營收、重大訊息、本益比 | 證交所、櫃買中心 OpenAPI | 每日 |

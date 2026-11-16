@@ -438,6 +438,12 @@ async function loadKline(keepRange = false) {
       bars = bars.filter((b) => b.t >= W[0] && b.t < W[1]);
       state.tickWin = W; state.sessShown = m; state.sessionEnd = W[1];
       if (m !== 'all') state.regular = []; // 單一時段不用把盤前盤後畫暗
+      state.nightErr = null;
+      if (m === 'night') { // Yahoo 沒有夜盤，改向 Alpaca（Blue Ocean ATS）要
+        const n = await api(`/api/overnight?code=${encodeURIComponent(code)}&start=${Math.floor(W[0])}&end=${Math.floor(W[1])}`).catch((e) => ({ bars: [], error: e.message }));
+        if (seq !== klineSeq) return;
+        bars = n.bars || []; state.nightErr = n.error || null;
+      }
     }
     if (P.agg) bars = aggregate(bars, P.agg, state.off);
     if (!state.quotes[code]) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + encodeURIComponent(code))); } catch {} }
@@ -457,7 +463,7 @@ async function loadKline(keepRange = false) {
       if (P.line) mainChart.timeScale().fitContent();
       else { const n = bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); }
     }
-    if (!bars.length) $('#legendMain').innerHTML = `<span class="lbl">${state.sessShown === 'night' ? '夜盤（美東 20:00–04:00）：資料來源 Yahoo 沒有提供夜盤逐筆走勢' : state.sessShown ? SESS[state.sessShown] + '時段目前還沒有資料' : '此週期沒有資料'}</span>`;
+    if (!bars.length) $('#legendMain').innerHTML = `<span class="lbl">${state.sessShown === 'night' ? (state.nightErr === 'nokey' ? '夜盤需要 Alpaca 免費金鑰：到「設定 → 夜盤資料」填入' : state.nightErr ? '夜盤資料載入失敗：' + esc(state.nightErr) : '夜盤時段目前還沒有成交') : state.sessShown ? SESS[state.sessShown] + '時段目前還沒有資料' : '此週期沒有資料'}</span>`;
     syncSessBtn();
   } catch (e) {
     if (seq === klineSeq) $('#legendMain').innerHTML = `<span class="lbl">K線載入失敗：${esc(e.message)}</span>`;
@@ -466,7 +472,8 @@ async function loadKline(keepRange = false) {
 function liveUpdate() {
   let q = state.quotes[state.code]; const P = PERIODS[state.period];
   if (sessOn() && state.sessMode === 'auto' && state.sessShown && sessResolved() !== state.sessShown) { loadKline(); return; }
-  if (sessOn() && state.tickWin && q && (state.sessShown === 'night' || (q.ext?.ts || q.ts) >= state.tickWin[1])) return;
+  if (sessOn() && state.tickWin && q && ((state.sessShown === 'night' && !q.ext?.night) || (q.ext?.ts || q.ts) >= state.tickWin[1])) return;
+  if (q && sessOn() && state.sessShown === 'night' && q.ext?.night) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
   if (q && useExt() && (q.session === 'PRE' || q.session === 'POST') && q.ext?.ts) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
   if (!q?.ts || q.price == null || !state.bars.length || !q.isOpen || !INTRADAY_LIVE.has(state.period)) return;
   const step = P.agg || ({ '1m': 60, '2m': 120, '5m': 300 }[P.interval]); if (!step) return;
@@ -776,7 +783,7 @@ function renderSide() {
   $('#favBtn').classList.toggle('on', state.watch.includes(c));
   $('#sidePrice').innerHTML = q ? `<span class="big num ${k}">${fmtP(q.price, pxDp(q.price))}</span><span class="chg num ${k}">${d > 0 ? "▲" : d < 0 ? "▼" : ""}${fmtP(Math.abs(d), pxDp(q.price))}　${sign(pct)}${pct.toFixed(2)}%</span>` : '<span class="big num">--</span>';
   const ds = q?.date ? `${q.date.slice(4, 6)}/${q.date.slice(6)}` : '';
-  const SESL = { REGULAR: '交易中', PRE: '盤前交易中', POST: '盤後交易中', OVERNIGHT: '夜盤時段（無免費報價）', CLOSED: '已收盤' };
+  const SESL = { REGULAR: '交易中', PRE: '盤前交易中', POST: '盤後交易中', OVERNIGHT: q?.ext?.night ? '夜盤交易中' : '夜盤時段（到設定填 Alpaca 金鑰可看夜盤）', CLOSED: '已收盤' };
   let st = q ? `${!tw && !isIdx && q.session ? SESL[q.session] : isOpenFor(c) ? '交易中' : '已收盤'}　${ds} ${q.time || ''}（${tw || isIdx ? '台北' : '交易所時間'}）${q.source === 'yahoo' && tw ? '　·Yahoo' : ''}` : '';
   if (q?.ext) { const ed = q.ext.price - q.price; st += `<div class="${cls(ed)}">${q.ext.label} ${fmtP(q.ext.price)}　${sign(ed)}${fmtP(ed)} (${sign(ed)}${((ed / q.price) * 100).toFixed(2)}%)　${q.ext.time || ''}</div>`; }
   $('#sideStatus').innerHTML = st;
@@ -948,12 +955,14 @@ function settingsPanel() {
     <div class="fld"><label>漲跌顏色</label><select id="stColor"><option value="redUp" ${S.colorMode === 'redUp' ? 'selected' : ''}>紅漲綠跌（台灣習慣）</option><option value="greenUp" ${S.colorMode === 'greenUp' ? 'selected' : ''}>綠漲紅跌（歐美習慣）</option></select></div>
     <div class="fld"><label>盤中更新頻率</label><select id="stRef">${[5, 10, 30].map((s) => `<option value="${s}" ${S.refresh === s ? 'selected' : ''}>每 ${s} 秒</option>`).join('')}</select></div>
     <div class="fld"><label>語言 Language</label><select id="stLang"><option value="zh" ${LANG === 'zh' ? 'selected' : ''}>繁體中文</option><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option></select></div>
+    <div class="fld"><label>夜盤資料</label><button class="btn sec" id="stAlpaca">設定 Alpaca 金鑰</button></div>
     <div class="fld"><label>推播通知</label><button class="btn sec" id="stNotify">設定 Telegram／Discord／ntfy</button></div>
     <div class="fld"><label>版面</label><button class="btn sec" id="stLayout">重設左右欄寬度</button></div>
     <div class="fld"><label>資料</label><button class="btn sec" id="stExport">匯出設定與自選</button><button class="btn sec" id="stImport">匯入</button></div>
-    <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
+    <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance，夜盤：Alpaca（Blue Ocean ATS）。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
     [{ label: '取消' }, { label: '儲存', act: (m) => { const lang = m.querySelector('#stLang').value; if (lang !== LANG) { setLang(lang); return; } S.colorMode = m.querySelector('#stColor').value; S.theme = m.querySelector('#stTheme').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); applyTheme(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
   $('#stNotify').onclick = () => { closeModal(); notifyPanel(); };
+  $('#stAlpaca').onclick = () => { closeModal(); alpacaPanel(); };
   $('#stLayout').onclick = () => { state.layout = { lw: 440, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
   $('#stExport').onclick = () => {
     const data = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('tw.')) data[k] = localStorage.getItem(k); }
