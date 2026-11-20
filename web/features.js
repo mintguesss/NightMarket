@@ -361,7 +361,7 @@ PAGES.multi = {
     $('#mtMore').innerHTML = `<option value="">更多</option>` + ks.filter((k) => PERIODS[k].more).map((k) => `<option value="${k}">${PERIODS[k].label}</option>`).join('');
     $('#mtMore').value = PERIODS[mtState.period].more ? mtState.period : ''; $('#mtMore').classList.toggle('active', !!PERIODS[mtState.period].more);
     $$('#mtPeriod button').forEach((b) => b.classList.toggle('active', b.dataset.p === mtState.period));
-    this.build(); clearInterval(mtState.timer); mtState.timer = setInterval(() => this.updateAll(), 30000);
+    this.build(); clearInterval(mtState.timer); mtState.ticks = 0; mtState.timer = setInterval(() => this.tick(), 5000);
   },
   leave() { clearInterval(mtState.timer); mtState.charts.forEach((c) => { try { c.chart.remove(); } catch {} }); mtState.charts = []; },
   build() {
@@ -400,6 +400,7 @@ PAGES.multi = {
       const maData = (n) => { const v = IND.sma(c, n); return bars.map((b, j) => (v[j] == null ? { time: b.t + off } : { time: b.t + off, value: v[j] })); };
       const lineD = bars.map((b) => ({ time: b.t + off, value: b.c })), candleD = bars.map((b) => ({ time: b.t + off, open: b.o, high: b.h, low: b.l, close: b.c }));
       const base = period === 'tick' ? q?.prev : bars[0].c, col = bars.at(-1).c >= (base ?? 0) ? UP : DOWN;
+      m.bars = bars; m.off = off; m.step = P.agg || STEP_OF[P.interval] || 0;
       if (!full) { // 只更新資料
         if (P.line) { m.series[0].applyOptions({ lineColor: col, topColor: col + '33', bottomColor: col + '00' }); m.series[0].setData(lineD); }
         else { m.series[0].setData(candleD); mas.forEach(([n], k) => m.series[k + 1]?.setData(maData(n))); }
@@ -423,6 +424,27 @@ PAGES.multi = {
       console.warn('多圖載入失敗', code, e);
       if (full || !m.series.length) cell.querySelector('.mt-q').textContent = '載入失敗';
     }
+  },
+  // 每 5 秒抓一次報價，只更新最後一根K棒（或新開一根）；每分鐘再在背景重抓完整K線補正均線和缺漏
+  async tick() {
+    if (state.view !== 'multi' || document.hidden) return;
+    if (++mtState.ticks % 12 === 0) return this.updateAll();
+    const codes = [...new Set(mtState.charts.map((m) => m?.code).filter(Boolean))]; if (!codes.length) return;
+    try { Object.assign(state.quotes, await api('/api/quote?codes=' + codes.map(encodeURIComponent).join(','))); } catch { return; }
+    mtState.charts.forEach((m, i) => { this.showQ(i); try { this.liveBar(m); } catch {} });
+  },
+  liveBar(m) {
+    const q = state.quotes[m.code], bars = m.bars, s = m.series[0];
+    if (!q || q.price == null || !q.ts || !bars?.length || !s || m.drawn !== m.code + '|' + mtState.period) return;
+    const P = PERIODS[mtState.period], last = bars.at(-1), t = q.ts, px = q.price, day = (x) => Math.floor((x + m.off) / 86400);
+    if (t < last.t) return;
+    let b = last;
+    if (m.step && t >= last.t + m.step) { // 分鐘級：進入下一個週期就新開一根
+      b = { t: last.t + Math.floor((t - last.t) / m.step) * m.step, o: px, h: px, l: px, c: px, v: 0 }; bars.push(b);
+    } else if (mtState.period === 'D' && day(t) > day(last.t)) { // 日K：新的一天
+      b = { t: t, o: q.open ?? px, h: q.high ?? px, l: q.low ?? px, c: px, v: 0 }; bars.push(b);
+    } else { b.c = px; b.h = Math.max(b.h, px); b.l = Math.min(b.l, px); }
+    s.update(P.line ? { time: b.t + m.off, value: b.c } : { time: b.t + m.off, open: b.o, high: b.h, low: b.l, close: b.c });
   },
   showQ(i) {
     const m = mtState.charts[i], cell = $$('#mtGrid .mt-cell')[i]; if (!m?.code || !cell) return;
