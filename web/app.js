@@ -222,7 +222,7 @@ function promptBox(title, label, val, onOk) {
 const chartOpts = (showTime) => ({
   layout: { background: { color: 'transparent' }, textColor: TXT, fontSize: 11, fontFamily: 'Segoe UI, Arial' },
   grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
-  rightPriceScale: { borderColor: CT.border, minimumWidth: 72 },
+  rightPriceScale: { borderColor: CT.border, minimumWidth: 72, scaleMargins: { top: 0.1, bottom: 0.06 } }, // 上下留白縮小，價格軸貼近K棒高低點
   timeScale: { borderColor: CT.border, visible: showTime, timeVisible: true, secondsVisible: false, rightOffset: 4 },
   crosshair: { mode: 0, vertLine: { color: CT.cross, labelBackgroundColor: CT.label }, horzLine: { color: CT.cross, labelBackgroundColor: CT.label } },
   localization: { locale: LANG === 'en' ? 'en-US' : 'zh-TW', dateFormat: 'yyyy/MM/dd' },
@@ -306,7 +306,8 @@ function renderMain() {
     }));
     state.overlays.forEach((k) => {
       const def = IND.MAIN[k]; if (!def) return;
-      def.calc(bars, IND.get('main', k)).lines.forEach((l) => { addLine(mainChart, mainSeries, l, bars); overlayInfo.push(l); });
+      // 均線等疊加線不參與價格軸自動縮放：價格軸只看畫面上K棒的高低點，不會被遠處的長天期均線撐大
+      def.calc(bars, IND.get('main', k)).lines.forEach((l) => { addLine(mainChart, mainSeries, l, bars).applyOptions({ autoscaleInfoProvider: () => null }); overlayInfo.push(l); });
     });
     // 價格提醒線
     const al = state.alerts[state.code];
