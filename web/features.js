@@ -349,7 +349,7 @@ $('#hmSize').addEventListener('click', (e) => { const b = e.target.closest('[dat
 window.addEventListener('resize', () => { if (state.view === 'heatmap') PAGES.heatmap.draw(); });
 
 /* ---------- 多圖同框 ---------- */
-const mtState = { layout: store.get('tw.mtLayout', 4), period: store.get('tw.mtPeriod', 'D'), charts: [], timer: null };
+const mtState = { layout: store.get('tw.mtLayout', 4), period: store.get('tw.mtPeriod', 'D'), charts: [], timer: null, run: 0 };
 const mtCodes = () => { const k = 'tw.multi.' + state.mkt; let c = store.get(k, null); if (!c) c = state.watch.slice(0, 9); return c; };
 const mtSave = (c) => store.set('tw.multi.' + state.mkt, c);
 PAGES.multi = {
@@ -371,41 +371,72 @@ PAGES.multi = {
     $$('#mtGrid .mt-cell').forEach((cell, i) => {
       const chart = LightweightCharts.createChart(cell.querySelector('.mt-chart'), { ...chartOpts(true), rightPriceScale: { borderColor: '#262b38', minimumWidth: 56, scaleMargins: { top: 0.1, bottom: 0.06 } } });
       mtState.charts[i] = { chart, code: codes[i] || null, series: [] };
-      this.update(i);
     });
+    this.updateAll(true);
   },
-  async update(i) {
-    const m = mtState.charts[i]; if (!m) return; const cell = $$('#mtGrid .mt-cell')[i]; m.series.forEach((s) => m.chart.removeSeries(s)); m.series = [];
-    if (!m.code) { cell.querySelector('.mt-name').textContent = ''; cell.querySelector('.mt-q').innerHTML = ''; return; }
-    const P = PERIODS[mtState.period] || PERIODS.D;
+  // 抓資料：失敗會等一下再試一次（同時開很多格時，Yahoo 偶爾會擋掉其中一個請求）
+  async fetchK(code, P) {
+    const url = `/api/kline?code=${encodeURIComponent(code)}&interval=${P.interval}&range=${P.range}`;
+    try { return await api(url); } catch { await new Promise((r) => setTimeout(r, 1200)); return api(url); }
+  },
+  // full=true：換股、換週期、剛打開時重畫並重設畫面範圍；false：定時刷新，只換資料，不動使用者調好的縮放和位置，失敗就保留舊圖
+  async update(i, full = true) {
+    const m = mtState.charts[i]; if (!m) return; const cell = $$('#mtGrid .mt-cell')[i];
+    if (!m.code) { m.series.forEach((s) => m.chart.removeSeries(s)); m.series = []; m.drawn = null; cell.querySelector('.mt-name').textContent = ''; cell.querySelector('.mt-q').innerHTML = ''; return; }
+    const P = PERIODS[mtState.period] || PERIODS.D, code = m.code, period = mtState.period;
+    if (!full && (!m.series.length || m.drawn !== code + '|' + period)) full = true;
     try {
-      const [d, qs] = await Promise.all([api(`/api/kline?code=${encodeURIComponent(m.code)}&interval=${P.interval}&range=${P.range}`), api('/api/quote?codes=' + encodeURIComponent(m.code))]);
-      if (mtState.charts[i] !== m) return;
-      const off = d.gmtoffset ?? 8 * 3600, q = qs[m.code]; Object.assign(state.quotes, qs);
-      let bars = d.bars; if (mtState.period === 'tick' && bars.length) { const day = Math.floor((bars.at(-1).t + off) / 86400); bars = bars.filter((b) => Math.floor((b.t + off) / 86400) === day); }
+      const d = await this.fetchK(code, P);
+      if (mtState.charts[i] !== m || m.code !== code || mtState.period !== period) return;
+      const off = d.gmtoffset ?? 8 * 3600, q = state.quotes[code];
+      let bars = d.bars; if (period === 'tick' && bars.length) { const day = Math.floor((bars.at(-1).t + off) / 86400); bars = bars.filter((b) => Math.floor((b.t + off) / 86400) === day); }
       if (P.agg) bars = aggregate(bars, P.agg, off);
       bars = sanitizeBars(bars, P.agg || STEP_OF[P.interval]);
-      const pf = pxDp(bars.at(-1)?.c ?? 0) === 0 ? { type: 'price', precision: 0, minMove: 1 } : { type: 'price', precision: 2, minMove: 0.01 };
-      const { d: ch, pct } = chgOf(q);
-      cell.querySelector('.mt-name').textContent = nameOf(m.code);
-      cell.querySelector('.mt-q').innerHTML = q ? `<span class="${cls(ch)}">${fmtP(q.price)}　${sign(pct)}${pct.toFixed(2)}%</span>` : '';
+      if (!bars.length) throw new Error('沒有資料');
+      const pf = pxDp(bars.at(-1).c) === 0 ? { type: 'price', precision: 0, minMove: 1 } : { type: 'price', precision: 2, minMove: 0.01 };
+      cell.querySelector('.mt-name').textContent = nameOf(code);
+      this.showQ(i);
+      const c = bars.map((b) => b.c), mas = [[20, '#f5a524'], [60, '#26c6da']];
+      const maData = (n) => { const v = IND.sma(c, n); return bars.map((b, j) => (v[j] == null ? { time: b.t + off } : { time: b.t + off, value: v[j] })); };
+      const lineD = bars.map((b) => ({ time: b.t + off, value: b.c })), candleD = bars.map((b) => ({ time: b.t + off, open: b.o, high: b.h, low: b.l, close: b.c }));
+      const base = period === 'tick' ? q?.prev : bars[0].c, col = bars.at(-1).c >= (base ?? 0) ? UP : DOWN;
+      if (!full) { // 只更新資料
+        if (P.line) { m.series[0].applyOptions({ lineColor: col, topColor: col + '33', bottomColor: col + '00' }); m.series[0].setData(lineD); }
+        else { m.series[0].setData(candleD); mas.forEach(([n], k) => m.series[k + 1]?.setData(maData(n))); }
+        return;
+      }
+      m.series.forEach((s) => m.chart.removeSeries(s)); m.series = [];
       if (P.line) {
-        const base = mtState.period === 'tick' ? q?.prev : bars[0]?.c;
-        const col = (bars.at(-1)?.c ?? 0) >= (base ?? 0) ? UP : DOWN, s = m.chart.addAreaSeries({ lineColor: col, topColor: col + '33', bottomColor: col + '00', lineWidth: 1.5, priceLineVisible: false, priceFormat: pf });
-        s.setData(bars.map((b) => ({ time: b.t + off, value: b.c }))); if (mtState.period === 'tick' && q?.prev) s.createPriceLine({ price: q.prev, color: '#7d8494', lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
+        const s = m.chart.addAreaSeries({ lineColor: col, topColor: col + '33', bottomColor: col + '00', lineWidth: 1.5, priceLineVisible: false, priceFormat: pf });
+        s.setData(lineD); if (period === 'tick' && q?.prev) s.createPriceLine({ price: q.prev, color: '#7d8494', lineStyle: 2, lineWidth: 1, axisLabelVisible: false });
         m.series.push(s);
       } else {
         const s = m.chart.addCandlestickSeries({ upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, priceLineVisible: false, priceFormat: pf });
-        s.setData(bars.map((b) => ({ time: b.t + off, open: b.o, high: b.h, low: b.l, close: b.c }))); m.series.push(s);
-        const c = bars.map((b) => b.c);
-        [[20, '#f5a524'], [60, '#26c6da']].forEach(([n, col]) => { const v = IND.sma(c, n), l = m.chart.addLineSeries({ color: col, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null }); l.setData(bars.map((b, j) => (v[j] == null ? { time: b.t + off } : { time: b.t + off, value: v[j] }))); m.series.push(l); });
+        s.setData(candleD); m.series.push(s);
+        mas.forEach(([n, mc]) => { const l = m.chart.addLineSeries({ color: mc, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, autoscaleInfoProvider: () => null }); l.setData(maData(n)); m.series.push(l); });
       }
+      m.drawn = code + '|' + period;
       m.chart.priceScale('right').applyOptions({ autoScale: true });
       if (P.line) m.chart.timeScale().fitContent();
       else { const n = bars.length; m.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 80), to: n + 2 }); }
-    } catch (e) { cell.querySelector('.mt-q').textContent = '載入失敗'; }
+    } catch (e) {
+      console.warn('多圖載入失敗', code, e);
+      if (full || !m.series.length) cell.querySelector('.mt-q').textContent = '載入失敗';
+    }
   },
-  updateAll() { if (state.view === 'multi') mtState.charts.forEach((_, i) => this.update(i)); },
+  showQ(i) {
+    const m = mtState.charts[i], cell = $$('#mtGrid .mt-cell')[i]; if (!m?.code || !cell) return;
+    const q = state.quotes[m.code]; if (!q) return; const { d: ch, pct } = chgOf(q);
+    cell.querySelector('.mt-q').innerHTML = `<span class="${cls(ch)}">${fmtP(q.price)}　${sign(pct)}${pct.toFixed(2)}%</span>`;
+  },
+  // 報價一次抓完，K線一格一格依序抓，不要同時丟出十幾個請求
+  async updateAll(full = false) {
+    if (state.view !== 'multi') return;
+    const run = ++mtState.run; // 換版面或週期時，舊的那一輪自動停下
+    const codes = [...new Set(mtState.charts.map((m) => m?.code).filter(Boolean))];
+    if (codes.length) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + codes.map(encodeURIComponent).join(','))); } catch {} }
+    for (let i = 0; i < mtState.charts.length; i++) { if (state.view !== 'multi' || run !== mtState.run) return; await this.update(i, full); }
+  },
 };
 $('#multiBtn').addEventListener('click', () => setView('multi'));
 $('#mtBack').addEventListener('click', () => setView('chart'));
@@ -417,7 +448,8 @@ $('#mtGrid').addEventListener('change', (e) => {
   if (!e.target.classList.contains('mt-code')) return;
   const i = +e.target.closest('.mt-cell').dataset.i, v = e.target.value.trim().toUpperCase(), codes = mtCodes();
   codes[i] = v ? (state.mkt === 'tw' ? v : 'US.' + v.replace(/^US\./, '')) : null; mtSave(codes);
-  mtState.charts[i].code = codes[i]; PAGES.multi.update(i);
+  mtState.charts[i].code = codes[i];
+  (async () => { if (codes[i]) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + encodeURIComponent(codes[i]))); } catch {} } PAGES.multi.update(i); })();
 });
 $('#mtGrid').addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (!b) return; const m = mtState.charts[+b.closest('.mt-cell').dataset.i]; if (m?.code) { selectCode(m.code); setView('chart'); } });
 
