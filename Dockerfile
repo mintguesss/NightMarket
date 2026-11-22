@@ -4,7 +4,7 @@
 FROM python:3.12-slim
 WORKDIR /app
 COPY server.py strategy.py picker.py ./
-COPY tools/pick_research.py ./tools/
+COPY tools/pick_research.py tools/meta_research.py ./tools/
 COPY web ./web
 ENV HOST=0.0.0.0 PORT=8765 TWSTOCK_DATA=/data PYTHONUNBUFFERED=1
 VOLUME /data

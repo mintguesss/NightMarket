@@ -506,10 +506,17 @@ PAGES.ai = {
     const opts = [`<option value="auto" ${p.auto ? 'selected' : ''}>自動：用研究第一名${res ? '（' + idText(res.best_id) + '）' : ''}</option>`]
       .concat((res?.top || []).map((t) => `<option value="${esc(t.id)}" ${!p.auto && t.id === [p.cfg.strat, 'top' + p.cfg.top, 'r' + p.cfg.rebal, 'sl' + p.cfg.stop, p.cfg.regime ? 'regime' : 'all'].join('|') ? 'selected' : ''}>${esc(idText(t.id))}</option>`)).join('');
     const wf = res?.walk_forward, base = res?.base || {};
-    const W = ['3m', '6m', '12m', '3y'], WN = { '3m': '近 3 月', '6m': '近 6 月', '12m': '近 12 月', '3y': '近 3 年' };
+    const W = ['1m', '3m', '6m', '12m', '3y'], WN = { '1m': '近 1 月', '3m': '近 3 月', '6m': '近 6 月', '12m': '近 12 月', '3y': '近 3 年' };
+    const meth = res?.method || { wins: ['6m', '12m'], rebal: 'quarterly' }, per = meth.rebal === 'monthly' ? '月' : '季';
+    const WT = { '1m': '1 個月', '3m': '3 個月', '6m': '6 個月', '12m': '12 個月', '3y': '3 年' }, winsT = (ws) => '近 ' + ws.map((w) => WT[w]).join('＋');
+    const meta = R.meta?.[state.mkt];
+    // 前後兩半各自跟等權重比：兩半都贏才算穩定，只贏一半可能是運氣
+    const comp = (rs, k) => (rs.reduce((a, x) => a * (1 + (x[k] || 0) / 100), 1) - 1) * 100;
+    const halves = (m) => { const h = Math.floor(m.rows.length / 2), a = m.rows.slice(0, h), b = m.rows.slice(h); return [comp(a, 'ret') - comp(a, 'ew'), comp(b, 'ret') - comp(b, 'ew')]; };
+    const bestM = meta?.methods?.[meta.best], stable = bestM ? halves(bestM).every((x) => x > 0) : null;
     const verdict = wf ? (wf.total > wf.ew_total && wf.total > wf.bench_total
-      ? `<span class="up">樣本外有效</span>：只用當時以前的資料選策略、再看下一季的真實表現，串接 ${wf.rows.length} 季累積 <b class="up">${pctS(wf.total)}</b>，贏過等權重全買 ${pctS(wf.ew_total)} 和大盤 ${pctS(wf.bench_total)}。`
-      : `<span class="down">樣本外沒有贏</span>：串接 ${wf.rows.length} 季累積 ${pctS(wf.total)}，等權重全買 ${pctS(wf.ew_total)}、大盤 ${pctS(wf.bench_total)}。這個市場的選股優勢不明顯，建議只當參考。`) : '';
+      ? `<span class="up">樣本外有效</span>：只用當時以前的資料選策略、再看下一${per}的真實表現，串接 ${wf.rows.length} ${per}累積 <b class="up">${pctS(wf.total)}</b>，贏過等權重全買 ${pctS(wf.ew_total)} 和大盤 ${pctS(wf.bench_total)}。`
+      : `<span class="down">樣本外沒有贏</span>：串接 ${wf.rows.length} ${per}累積 ${pctS(wf.total)}，等權重全買 ${pctS(wf.ew_total)}、大盤 ${pctS(wf.bench_total)}。這個市場的選股優勢不明顯，建議只當參考。`) : '';
     $('#aiBody').innerHTML = `
       <div class="cards">
         <div class="card"><div class="k">目前策略</div><div class="v" style="font-size:18px">${esc(p.strat_name)}</div><div class="s">${esc(p.strat_desc)}</div></div>
@@ -525,14 +532,19 @@ PAGES.ai = {
         ${p.rows.map((r) => { const q = state.quotes[r.code]; return `<tr data-code="${esc(r.code)}" class="${r.rank <= p.cfg.top ? 'ai-in' : 'muted'}"><td class="num">${r.rank}${held.has(r.code) ? ' <span class="tag buy">持有</span>' : ''}</td><td class="l">${nmCell(r.code, r.name)}</td>
           <td class="num">${fmtP(r.price)}</td><td class="num ${q ? cls(chgOf(q).d) : ''}">${q ? fmtP(q.price) : '--'}</td><td class="num ${cls(r.r20)}">${pctS(r.r20)}</td><td class="num ${cls(r.r120)}">${pctS(r.r120)}</td><td class="l small">${esc(r.reason)}</td></tr>`; }).join('')}</tbody></table>
       <div class="sec-title"><b>驗證結果</b><span>${res ? `研究於 ${new Date(res.updated * 1000).toLocaleString('zh-TW')}・${res.universe} 檔・160 組設定` : '還沒有研究結果'}${st.running ? '・<b class="up">重新研究中…</b>' : st.msg ? '・' + esc(st.msg) : ''}</span></div>
-      ${res ? `<div class="ai-verdict">${verdict}<div class="muted small" style="margin-top:6px">選策略的方式：依近 6 個月與 12 個月的夏普值排名（滾動測試中比加入 3 個月或 3 年的版本好）；多數時段輸給等權重全買、或回撤超過 35% 的會被扣分。股票池用的是目前的大型股，回測報酬會偏高（倖存者偏差），所以重點看「有沒有贏等權重全買」。</div></div>
+      ${res ? `<div class="ai-verdict">${verdict}<div class="muted small" style="margin-top:6px">選策略的方式：依${winsT(meth.wins)}的夏普值排名，每${per}重選一次${meta ? `（交叉測試 ${Object.keys(meta.methods).length} 種選法後，這個市場樣本外最好的做法）` : ''}；多數時段輸給等權重全買、或回撤超過 35% 的會被扣分。股票池用的是目前的大型股，回測報酬會偏高（倖存者偏差），所以重點看「有沒有贏等權重全買」。</div></div>
         <table class="tbl"><thead><tr><th class="l">策略（各自最佳參數）</th>${W.map((w) => `<th>${WN[w]}</th>`).join('')}<th>近 12 月夏普</th><th>3 年最大回撤</th></tr></thead><tbody>
           ${res.by_strat.map((b) => `<tr class="${b.strat === p.cfg.strat ? 'ai-in' : ''}"><td class="l"><b>${esc(b.name)}</b> <span class="muted small">${esc(b.desc)}</span></td>${W.map((w) => { const x = b.win[w] || {}; return `<td class="num ${cls(x.excess || 0)}" title="比等權重全買 ${pctS(x.excess)}">${pctS(x.ret)}</td>`; }).join('')}
             <td class="num">${(b.win['12m']?.sharpe ?? 0).toFixed(2)}</td><td class="num down">${pctS(b.win['3y']?.mdd, 0)}</td></tr>`).join('')}
           <tr class="muted"><td class="l">等權重全買股票池</td>${W.map((w) => `<td class="num">${pctS(base[w]?.ew?.ret)}</td>`).join('')}<td class="num">${(base['12m']?.ew?.sharpe ?? 0).toFixed(2)}</td><td class="num">${pctS(base['3y']?.ew?.mdd, 0)}</td></tr>
           <tr class="muted"><td class="l">大盤（${state.mkt === 'tw' ? '0050' : 'SPY'}）</td>${W.map((w) => `<td class="num">${pctS(base[w]?.bench?.ret)}</td>`).join('')}<td class="num">${(base['12m']?.bench?.sharpe ?? 0).toFixed(2)}</td><td class="num">${pctS(base['3y']?.bench?.mdd, 0)}</td></tr></tbody></table>
         <div class="muted small" style="padding:4px 16px">數字顏色：贏等權重全買為紅（漲色），輸為綠（跌色）。滑鼠移到數字上可看超額報酬。</div>
-        ${wf ? `<div class="sec-title"><b>滾動樣本外測試</b><span>每一季只用當時以前的資料選出第一名，持有下一季</span></div>
+        ${meta ? `<div class="sec-title"><b>選策略方式比較</b><span>過去 ${meta.months} 個月樣本外：每次只用當時以前的資料選策略，持有到下次重選；等權重 ${pctS(meta.base.ew)}、大盤 ${pctS(meta.base.bench)}</span></div>
+        <table class="tbl"><thead><tr><th class="l">看哪些期間</th><th class="l">多久重選</th><th>累積報酬</th><th>最大回撤</th><th>贏等權重的次數</th><th>前半段 vs 等權重</th><th>後半段 vs 等權重</th></tr></thead><tbody>
+          ${meta.ranked.map((k) => { const m = meta.methods[k]; return `<tr class="${k === meta.best ? 'ai-in' : ''}"><td class="l">${winsT(m.wins)}${k === meta.best ? ' <span class="tag buy">採用</span>' : ''}</td><td class="l">${m.rebal === 'monthly' ? '每月' : '每季'}</td>
+            <td class="num ${cls(m.total - meta.base.ew)}">${pctS(m.total)}</td><td class="num down">${pctS(m.mdd, 0)}</td><td class="num">${m.beat_ew} / ${m.periods}</td>${halves(m).map((x) => `<td class="num ${cls(x)}">${pctS(x)}</td>`).join('')}</tr>`; }).join('')}</tbody></table>
+        <div class="ai-verdict" style="margin-top:8px">${stable ? `<span class="up">選法穩定</span>：採用的選法在前半段和後半段都贏過等權重全買。` : `<span class="down">選法不穩定</span>：採用的選法只有一半時間贏等權重全買，可能只是運氣；這個市場的 AI 建議請當參考，長期來看買進持有大型股不一定比較差。`}</div>` : ''}
+        ${wf ? `<div class="sec-title"><b>滾動樣本外測試</b><span>每一${per}只用當時以前的資料選出第一名，持有下一${per}</span></div>
         <table class="tbl"><thead><tr><th class="l">選策略的日期</th><th class="l">當時選中</th><th>下一季</th><th>等權重</th><th>大盤</th></tr></thead><tbody>
           ${wf.rows.map((x) => `<tr><td class="l num">${new Date(x.from * 1000).toLocaleDateString('zh-TW')}</td><td class="l small">${esc(idText(x.pick))}</td><td class="num ${cls((x.ret || 0) - (x.ew || 0))}">${pctS(x.ret)}</td><td class="num">${pctS(x.ew)}</td><td class="num">${pctS(x.bench)}</td></tr>`).join('')}</tbody></table>` : ''}` : '<div class="empty">按右上角「重新研究」產生驗證結果（約 3～5 分鐘）</div>'}
       <div class="sec-title"><b>AI 動作紀錄</b></div>

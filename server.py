@@ -2266,6 +2266,16 @@ def ai_research_run(which="all"):
         try:
             sys.path.insert(0, os.path.join(ROOT, "tools"))
             import pick_research
+            meta = ai_meta()
+            if meta_stale(meta):  # 「選策略的方式」每季重新交叉測試一次（約 10 分鐘）
+                _research["msg"] = "重新測試各市場的選策略方式…"
+                import meta_research
+                for m in ("tw", "us"):
+                    r = meta_research.run(m)
+                    cur = ai_meta(); cur[m] = r
+                    with open(META_FILE, "w", encoding="utf-8") as f:
+                        json.dump(cur, f, ensure_ascii=False, indent=1)
+            _research["msg"] = "研究中…"
             pick_research.run_all(which)
             _research["msg"] = "研究完成"
             for m in ("tw", "us"):
@@ -2278,12 +2288,37 @@ def ai_research_run(which="all"):
     return {"ok": True, "msg": "開始重新研究，約需 3～5 分鐘"}
 
 
+META_FILE = os.path.join(DATA_DIR, "ai_meta.json")
+
+
+def ai_meta():
+    try:
+        with open(META_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def meta_stale(meta):
+    return any(time.time() - (meta.get(m) or {}).get("updated", 0) > 91 * 86400 for m in ("tw", "us"))
+
+
+def research_due(r):
+    """研究多久重跑一次＝這個市場「多久重選一次策略」（每月或每季），跟交叉測試驗證過的做法一致。"""
+    for m in ("tw", "us"):
+        x = r.get(m) or {}
+        period = 30 if (x.get("method") or {}).get("rebal") == "monthly" else 91
+        if time.time() - x.get("updated", 0) > period * 86400:
+            return True
+    return False
+
+
 def ai_trader():
     time.sleep(30)
     while True:
-        try:  # 研究結果超過 7 天就自動重跑（週末市場關閉時跑最剛好，但沒跑過也會補）
+        try:
             r = ai_research()
-            if not _research["running"] and (not r or time.time() - min((r.get(m) or {}).get("updated", 0) for m in ("tw", "us")) > 7 * 86400):
+            if not _research["running"] and (not r or research_due(r) or meta_stale(ai_meta())):
                 ai_research_run()
         except Exception as e:
             print("ai research error:", e, file=sys.stderr)
@@ -2545,7 +2580,7 @@ class Handler(SimpleHTTPRequestHandler):
             elif u.path == "/api/ai/picks":
                 self.send_json(ai_picks_api(q.get("mkt", "tw"), q.get("refresh") == "1"))
             elif u.path == "/api/ai/research":
-                self.send_json({**ai_research(), "status": _research})
+                self.send_json({**ai_research(), "status": _research, "meta": ai_meta()})
             else:
                 self.send_json({"error": "not found"}, 404)
         except Exception as e:

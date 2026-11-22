@@ -8,7 +8,7 @@ py -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name NightMarket ^
   --icon web\icons\app.ico ^
   --add-data "web;web" ^
-  --add-data "tools\pick_research.py;tools" ^
+  --add-data "tools\pick_research.py;tools" --add-data "tools\meta_research.py;tools" ^
   --hidden-import server --hidden-import strategy --hidden-import picker ^
   launcher.pyw
 echo.

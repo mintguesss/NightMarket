@@ -21,10 +21,27 @@ import server as S  # noqa: E402
 
 BENCH = {"tw": "0050", "us": "US.SPY"}
 GRID = {"strat": list(PK.STRATS), "top": [5, 10], "rebal": [5, 20], "stop": [0, 10], "regime": [False, True]}
-WINDOWS = [("3m", 63, 0.2), ("6m", 126, 0.3), ("12m", 252, 0.3), ("3y", 756, 0.2)]  # 顯示用的時間窗
-# 選策略用的評分：滾動樣本外測試中「只看近 6 個月和 12 個月」在台股、美股都比加入 3 個月或 3 年的版本好
-SELECT = [("6m", 126, 0.5), ("12m", 252, 0.5)]
+LEN = {"1m": 21, "3m": 63, "6m": 126, "12m": 252, "3y": 756}
+WINDOWS = [(k, v, 0.2) for k, v in LEN.items()]  # 顯示用的時間窗
+# 選策略用的評分（看哪些期間）與多久重選一次：各市場不同，由 tools/meta_research.py 的交叉測試決定（ai_meta.json）
+DEFAULT_METHOD = {"wins": ["6m", "12m"], "rebal": "quarterly"}
 LONG = [("12m", 252, 0.5), ("3y", 756, 0.5)]
+HOLD = {"monthly": 21, "quarterly": 63}
+
+
+def method(mkt):
+    """這個市場選策略的方式：{wins, rebal, name}。"""
+    try:
+        m = json.load(open(os.path.join(S.DATA_DIR, "ai_meta.json"), encoding="utf-8"))[mkt]
+        b = m["methods"][m["best"]]
+        return {"wins": b["wins"], "rebal": b["rebal"], "name": b["method"]}
+    except (OSError, ValueError, KeyError):
+        return dict(DEFAULT_METHOD, name="6m+12m")
+
+
+def select_windows(mkt):
+    w = method(mkt)["wins"]
+    return [(k, LEN[k], 1 / len(w)) for k in w]
 
 
 def universe(mkt):
@@ -104,8 +121,9 @@ def score(res, windows=WINDOWS):
     return sorted(ids, key=lambda i: -total[i]), total
 
 
-def walk_forward(mkt, data, feats, bench, steps=6, hold=63, wins=SELECT, log=True):
+def walk_forward(mkt, data, feats, bench, steps=6, hold=63, wins=None, log=True):
     """滾動樣本外：在每個時間點只用過去資料選出第一名，持有下一季，最後串起來看真實表現。"""
+    wins = wins or select_windows(mkt)
     n = len(bench) - 1
     chain, rows = 1.0, []
     ew_chain, bm_chain = 1.0, 1.0
@@ -136,15 +154,17 @@ def run(mkt):
     feats = {c: PK.features(b) for c, b in data.items()}
     print(f"[{mkt}] 有資料 {len(data)} 檔，開始回測 {len(list(configs()))} 組設定 × {len(WINDOWS)} 個時間窗")
     res, base = evaluate(mkt, data, feats, bench, len(bench) - 1)
-    order, total = score(res, SELECT)
+    meth = method(mkt)
+    order, total = score(res, select_windows(mkt))
     print(f"[{mkt}] 前 10 名（{time.time() - t0:.0f} 秒）")
     for i in order[:10]:
         w = res[i]["win"]
         print(f"  {total[i]:.2f} {i:38s} " + "  ".join(f"{k}:{w.get(k, {}).get('ret', 0):+6.1f}%/夏普{w.get(k, {}).get('sharpe', 0):4.1f}" for k, _, _ in WINDOWS) + f"  3y回撤{w.get('3y', {}).get('mdd', 0):.0f}%")
     print("  基準：" + "  ".join(f"{k} 等權{base[k]['ew'].get('ret', 0):+.1f}% 大盤{base[k]['bench'].get('ret', 0):+.1f}%" for k, _, _ in WINDOWS))
     print(f"[{mkt}] 滾動樣本外驗證…")
-    wf = walk_forward(mkt, data, feats, bench)
-    wf_long = walk_forward(mkt, data, feats, bench, wins=LONG, log=False)
+    hold = HOLD[meth["rebal"]]
+    wf = walk_forward(mkt, data, feats, bench, steps=378 // hold, hold=hold)  # 過去 18 個月
+    wf_long = walk_forward(mkt, data, feats, bench, steps=378 // hold, hold=hold, wins=LONG, log=False)
     wf["long_total"] = wf_long["total"]
     print(f"[{mkt}] 樣本外串接：策略 {wf['total']:+.1f}%（偏長期評分 {wf_long['total']:+.1f}%）  等權 {wf['ew_total']:+.1f}%  大盤 {wf['bench_total']:+.1f}%  （{time.time() - t0:.0f} 秒）")
     # 各策略（不分參數）最佳成績，給網頁的比較表
@@ -152,7 +172,7 @@ def run(mkt):
     for i in order:
         k = res[i]["cfg"]["strat"]
         by_strat.setdefault(k, {"id": i, "score": total[i], "win": res[i]["win"]})
-    return {"mkt": mkt, "updated": int(time.time()), "universe": len(data), "best": res[order[0]]["cfg"], "best_id": order[0],
+    return {"mkt": mkt, "updated": int(time.time()), "universe": len(data), "method": meth, "best": res[order[0]]["cfg"], "best_id": order[0],
             "top": [{"id": i, "score": total[i], "cfg": res[i]["cfg"], "win": res[i]["win"]} for i in order[:15]],
             "by_strat": [{"strat": k, "name": PK.STRATS[k]["name"], "desc": PK.STRATS[k]["desc"], **v} for k, v in by_strat.items()],
             "base": base, "walk_forward": wf}

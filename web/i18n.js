@@ -163,7 +163,7 @@ Object.assign(I18N_EN, {
   '入選理由': 'Why it was picked', '持有': 'Held', '策略（各自最佳參數）': 'Strategy (best parameters)', '近 3 月': '3M', '近 6 月': '6M', '近 12 月': '12M', '近 3 年': '3Y',
   '近 12 月夏普': '12M Sharpe', '3 年最大回撤': '3Y max drawdown', '等權重全買股票池': 'Equal-weight universe', '選策略的日期': 'Selection date', '當時選中': 'Picked then',
   '下一季': 'Next quarter', '等權重': 'Equal-weight', '台股市值前': 'Top Taiwan stocks by market cap:', '美股市值前': 'Top US stocks by market cap:', ' 檔': '',
-  '我的': 'Mine', '交易所時間': 'exchange time', '夜盤交易中': 'Overnight', '還沒有動作。開盤時 AI 會自動建倉，之後依調倉週期換股。': 'No activity yet. The AI buys at the next open and rotates on its rebalance schedule.',
+  '我的': 'Mine', '前半段 vs 等權重': '1st half vs EW', '後半段 vs 等權重': '2nd half vs EW', '選法穩定': 'Stable method', '選法不穩定': 'Unstable method', '近 1 月': '1M', '選策略方式比較': 'Selection methods compared', '看哪些期間': 'Lookback', '多久重選': 'Re-select', '累積報酬': 'Cumulative', '最大回撤': 'Max drawdown', '贏等權重的次數': 'Periods beating equal-weight', '每月': 'Monthly', '每季': 'Quarterly', '採用': 'In use', '交易所時間': 'exchange time', '夜盤交易中': 'Overnight', '還沒有動作。開盤時 AI 會自動建倉，之後依調倉週期換股。': 'No activity yet. The AI buys at the next open and rotates on its rebalance schedule.',
   'AI 還沒有持股：開盤時會依「AI 選股」頁的策略自動買進。': 'No AI holdings yet — it buys at the next open using the strategy on the AI Picks page.',
   '策略與每日建議在「AI 選股」頁': 'Strategy and daily picks are on the AI Picks page', 'AI 自動管理，點一列切到該股票': 'Managed by the AI · click a row to open the chart',
   // 策略名稱與說明
