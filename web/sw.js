@@ -1,6 +1,6 @@
 /* Service worker：讓手機可以「加入主畫面」。
    網頁檔案一律先連網路取最新版，連不上才用快取（避免更新後還看到舊版）；/api/ 行情資料不快取。 */
-const CACHE = 'nightmarket-v22';
+const CACHE = 'nightmarket-v23';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'pages.js', 'panels.js', 'indicators.js', 'draw.js', 'mobile.js',
   'features.js', 'i18n.js', 'names-zh.json', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 

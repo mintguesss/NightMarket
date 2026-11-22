@@ -244,13 +244,24 @@ const draw = new Drawings($('#paneMain'), mainChart, {
   save: (items) => store.set('tw.draw.' + state.code, items),
 });
 
-function clearSeries(chart, list) { list.forEach((s) => chart.removeSeries(s)); list.length = 0; }
+function clearSeries(chart, list) { if (SOFT) return; list.forEach((s) => chart.removeSeries(s)); list.length = 0; }
+// 軟更新模式：不刪掉重建圖層，而是依建立順序拿回原本的 series 換資料。畫面不閃、縮放和位置不動
+let SOFT = null;
+function mkSeries(chart, list, type, opts) {
+  if (SOFT) {
+    const k = SOFT.get(list) || 0, s = list[k]; SOFT.set(list, k + 1);
+    if (!s || s._type !== type) throw new Error('soft-mismatch');
+    return s;
+  }
+  const s = chart['add' + type + 'Series'](opts); s._type = type; list.push(s); return s;
+}
+const priceLine = (s, o) => { if (!SOFT && s) s.createPriceLine(o); };
 const toTime = (t) => t + state.off;
 const lineData = (bars, vals) => bars.map((b, i) => (vals[i] == null || isNaN(vals[i]) ? { time: toTime(b.t) } : { time: toTime(b.t), value: vals[i] }));
 function addLine(chart, list, l, bars) {
-  const s = chart.addLineSeries({ color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+  const s = mkSeries(chart, list, 'Line', { color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
     lineStyle: l.dash ? 2 : 0, ...(l.dots ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 1.5 } : {}) });
-  list.push(s); s.setData(lineData(bars, l.vals)); return s; // 先登記再塞資料：塞資料出錯時，下次重畫仍會把它清掉
+  s.setData(lineData(bars, l.vals)); return s; // 先登記再塞資料：塞資料出錯時，下次重畫仍會把它清掉
 }
 // K 線資料健檢：去掉壞值、依時間排序、同一時間只留最後一筆，最後一根對齊週期（Yahoo 最後一根常帶著秒數）
 function sanitizeBars(bars, step) {
@@ -277,8 +288,8 @@ function renderMain() {
   const closes = bars.map((b) => b.c), big = pxDp(closes[closes.length - 1]) === 0, pf = big ? { type: 'price', precision: 0, minMove: 1 } : { type: 'price', precision: 2, minMove: 0.01 };
   if (P.line) {
     const last = closes[closes.length - 1], base = state.prev ?? closes[0], col = last >= base ? UP : DOWN;
-    primary = mainChart.addAreaSeries({ lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
-    mainSeries.push(primary);
+    primary = mkSeries(mainChart, mainSeries, 'Area', { lineColor: col, topColor: col + '44', bottomColor: col + '05', lineWidth: 1.5, priceFormat: pf, priceLineVisible: false });
+    if (SOFT) primary.applyOptions({ lineColor: col, topColor: col + '44', bottomColor: col + '05' });
     const data = bars.map((b) => (inRegular(b.t) ? { time: toTime(b.t), value: b.c } : { time: toTime(b.t), value: b.c, lineColor: CT.ext, topColor: CT.ext + '22', bottomColor: CT.ext + '03' }));
     if (state.period === 'tick') {
       const end = state.sessionEnd && state.sessionEnd > bars[0].t && state.sessionEnd - bars[0].t < 86400 ? state.sessionEnd
@@ -287,7 +298,7 @@ function renderMain() {
     }
     state.fillTimes = state.period === 'tick' ? data.map((x) => x.time) : null;
     primary.setData(data);
-    if (base) primary.createPriceLine({ price: base, color: '#7d8494', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '昨收' });
+    if (base) priceLine(primary, { price: base, color: '#7d8494', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '昨收' });
     let pv = 0, vv = 0;
     const avg = bars.map((b, i) => {
       if (i > 0 && Math.floor((b.t + state.off) / 86400) !== Math.floor((bars[i - 1].t + state.off) / 86400)) { pv = 0; vv = 0; }
@@ -297,8 +308,7 @@ function renderMain() {
     // 均價線不參與價格軸自動縮放：價格軸只依畫面上這段走勢的高低點調整，不會被遠處的均價線壓扁
     addLine(mainChart, mainSeries, l, bars).applyOptions({ autoscaleInfoProvider: () => null }); overlayInfo.push(l);
   } else {
-    primary = mainChart.addCandlestickSeries({ upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, priceFormat: pf });
-    mainSeries.push(primary);
+    primary = mkSeries(mainChart, mainSeries, 'Candlestick', { upColor: UP, downColor: DOWN, borderUpColor: UP, borderDownColor: DOWN, wickUpColor: UP, wickDownColor: DOWN, priceFormat: pf });
     primary.setData(bars.map((b) => {
       const o = { time: toTime(b.t), open: b.o, high: b.h, low: b.l, close: b.c };
       if (!inRegular(b.t)) { const c = (b.c >= b.o ? UP : DOWN) + '66'; Object.assign(o, { color: c, borderColor: c, wickColor: c }); } // 盤前盤後K棒半透明
@@ -311,8 +321,8 @@ function renderMain() {
     });
     // 價格提醒線
     const al = state.alerts[state.code];
-    if (al?.above) primary.createPriceLine({ price: al.above, color: '#f5a524', lineStyle: 1, title: '提醒↑', axisLabelVisible: true });
-    if (al?.below) primary.createPriceLine({ price: al.below, color: '#f5a524', lineStyle: 1, title: '提醒↓', axisLabelVisible: true });
+    if (al?.above) priceLine(primary, { price: al.above, color: '#f5a524', lineStyle: 1, title: '提醒↑', axisLabelVisible: true });
+    if (al?.below) priceLine(primary, { price: al.below, color: '#f5a524', lineStyle: 1, title: '提醒↓', axisLabelVisible: true });
   }
   updateLegend(bars.length - 1); draw.redraw(); setTimeout(() => draw.redraw(), 80);
 }
@@ -329,16 +339,15 @@ function renderSub(i) {
   const chart = subCharts[i]; clearSeries(chart, subSeries[i]); subInfo[i] = []; subPrimary[i] = null;
   const key = state.subs[i], bars = state.bars; if (!key || !bars.length) { $('#legendSub' + (i + 1)).innerHTML = ''; return; }
   const r = IND.SUB[key].calc(bars, IND.get('sub', key), { volDiv: isTW(state.code) ? 1000 : 1 });
-  if (state.fillTimes && PERIODS[state.period].line) { const ws = chart.addLineSeries({ visible: false, priceLineVisible: false, lastValueVisible: false }); subSeries[i].push(ws); ws.setData(state.fillTimes.map((t) => ({ time: t }))); } // 副圖也補空白時段到收盤
+  if (state.fillTimes && PERIODS[state.period].line) { const ws = mkSeries(chart, subSeries[i], 'Line', { visible: false, priceLineVisible: false, lastValueVisible: false }); ws.setData(state.fillTimes.map((t) => ({ time: t }))); } // 副圖也補空白時段到收盤
   if (r.hist) {
-    const s = chart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceFormat: r.volume ? { type: 'volume' } : { type: 'price', precision: 2, minMove: 0.01 } });
-    subSeries[i].push(s);
+    const s = mkSeries(chart, subSeries[i], 'Histogram', { priceLineVisible: false, lastValueVisible: false, priceFormat: r.volume ? { type: 'volume' } : { type: 'price', precision: 2, minMove: 0.01 } });
     s.setData(bars.map((b, j) => (r.hist[j].v == null || isNaN(r.hist[j].v) ? { time: toTime(b.t) } : { time: toTime(b.t), value: r.hist[j].v, color: (r.hist[j].up ? UP : DOWN) + 'cc' })));
     subPrimary[i] = s; subInfo[i].push({ name: r.label || key, color: CT.hist, vals: r.hist.map((h) => h.v), vol: r.volume });
   }
   r.lines.forEach((l) => { const s = addLine(chart, subSeries[i], l, bars); if (!subPrimary[i]) subPrimary[i] = s; subInfo[i].push({ ...l, vol: r.volume }); });
   if (r.volume && !r.hist) subSeries[i].forEach((s) => s.applyOptions({ priceFormat: { type: 'volume' } }));
-  (r.guides || []).forEach((g) => subPrimary[i]?.createPriceLine({ price: g, color: CT.guide, lineStyle: 2, axisLabelVisible: false }));
+  (r.guides || []).forEach((g) => priceLine(subPrimary[i], { price: g, color: CT.guide, lineStyle: 2, axisLabelVisible: false }));
   updateSubLegend(i, bars.length - 1);
 }
 
@@ -378,6 +387,18 @@ allCharts.forEach((c) => c.subscribeCrosshairMove((p) => {
 }));
 
 let renderFails = 0;
+// 只更新資料（即時報價、每分鐘補K線用）：圖層結構一樣就沿用原本的 series，不重建、不動縮放；結構變了才整張重畫
+const renderSig = () => [state.code, state.period, state.overlays.join(), state.subs.join(), JSON.stringify(state.alerts[state.code] || {}), !!state.fillTimes, state.sessShown].join('|');
+let lastSig = null;
+function softRender() {
+  if (!primary || lastSig !== renderSig() || !mainSeries.length) return rerender(true);
+  SOFT = new Map();
+  try {
+    reindex(); renderMain();
+    [0, 1].forEach((i) => { if (state.subs[i]) renderSub(i); });
+    SOFT = null; lastSig = renderSig();
+  } catch (e) { SOFT = null; if (e.message !== 'soft-mismatch') console.warn('soft', e); rerender(true); }
+}
 function rerender(keep) {
   const range = keep ? mainChart.timeScale().getVisibleLogicalRange() : null;
   try {
@@ -386,7 +407,7 @@ function rerender(keep) {
     for (let i = 0; i < b.length; i++) {
       if (!(b[i].c > 0) || !isFinite(b[i].o) || !isFinite(b[i].h) || !isFinite(b[i].l) || (i && b[i].t <= b[i - 1].t)) { state.bars = sanitizeBars(b); break; }
     }
-    reindex(); renderMain(); renderSubs();
+    reindex(); renderMain(); renderSubs(); lastSig = renderSig();
     if (state.period === 'tick') mainChart.timeScale().fitContent(); // 分時固定顯示整個交易日
     else if (range) mainChart.timeScale().setVisibleLogicalRange(range);
     renderFails = 0;
@@ -463,7 +484,8 @@ async function loadKline(keepRange = false) {
     state.bars = sanitizeBars(bars, P.agg || STEP_OF[P.interval]); state.lastVol = q?.volume ?? null; bars = state.bars;
     if (!keepRange) allCharts.forEach((c) => c.priceScale('right').applyOptions({ autoScale: true })); // 換股或換週期時恢復自動縮放，避免價格軸被拖動後K棒跑出畫面
     state.prev = P.line ? (state.period === 'tick' ? q?.prev ?? d.prev : d.prev) : null;
-    rerender(keepRange); updateAuto();
+    if (keepRange) softRender(); else rerender(false);
+    updateAuto();
     if (!keepRange) {
       if (P.line) mainChart.timeScale().fitContent();
       else { const n = bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); }
@@ -480,15 +502,18 @@ function liveUpdate() {
   if (sessOn() && state.tickWin && q && ((state.sessShown === 'night' && !q.ext?.night) || (q.ext?.ts || q.ts) >= state.tickWin[1])) return;
   if (q && sessOn() && state.sessShown === 'night' && q.ext?.night) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
   if (q && useExt() && (q.session === 'PRE' || q.session === 'POST') && q.ext?.ts) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
-  if (!q?.ts || q.price == null || !state.bars.length || !q.isOpen || !INTRADAY_LIVE.has(state.period)) return;
-  const step = P.agg || ({ '1m': 60, '2m': 120, '5m': 300 }[P.interval]); if (!step) return;
+  if (!q?.ts || q.price == null || !state.bars.length || !q.isOpen) return;
+  const step = INTRADAY_LIVE.has(state.period) ? P.agg || ({ '1m': 60, '2m': 120, '5m': 300 }[P.interval]) : 0;
+  if (!step && P.interval !== '1d' && P.interval !== '1wk' && P.interval !== '1mo') return;
   const last = state.bars[state.bars.length - 1], volMul = isTW(state.code) ? 1000 : 1;
   const dv = state.lastVol != null && q.volume != null ? Math.max(0, (q.volume - state.lastVol) * volMul) : 0;
   state.lastVol = q.volume;
   if (!(q.price > 0) || q.ts < last.t) return;
-  if (q.ts < last.t + step) { last.c = q.price; last.h = Math.max(last.h, q.price); last.l = Math.min(last.l, q.price); last.v += dv; }
-  else state.bars.push({ t: last.t + Math.floor((q.ts - last.t) / step) * step, o: q.price, h: q.price, l: q.price, c: q.price, v: dv });
-  rerender(true);
+  const day = (t) => Math.floor((t + state.off) / 86400);
+  if (step && q.ts >= last.t + step) state.bars.push({ t: last.t + Math.floor((q.ts - last.t) / step) * step, o: q.price, h: q.price, l: q.price, c: q.price, v: dv });
+  else if (!step && P.interval === '1d' && day(q.ts) > day(last.t)) state.bars.push({ t: q.ts, o: q.open ?? q.price, h: q.high ?? q.price, l: q.low ?? q.price, c: q.price, v: dv }); // 日K：新的一天開新的一根
+  else { last.c = q.price; last.h = Math.max(last.h, q.price); last.l = Math.min(last.l, q.price); last.v += dv; }
+  softRender(); updateLegend(state.bars.length - 1);
 }
 
 /* ---------- 指標列 / 畫線列 ---------- */
