@@ -18,9 +18,13 @@ python server.py        # 打開 http://localhost:8765
 
 ![看盤](docs/screenshots/chart-zh.png)
 
-| 策略回測 | 市場熱力圖 | 手機版 |
-|---|---|---|
-| ![回測](docs/screenshots/backtest-zh.png) | ![熱力圖](docs/screenshots/heatmap-zh.png) | <img src="docs/screenshots/mobile-zh.jpg" width="200"> |
+| AI 選股與驗證 | 多圖同框 |
+|---|---|
+| ![AI 選股](docs/screenshots/ai-zh.png) | ![多圖](docs/screenshots/multi-zh.png) |
+
+| 策略回測 | 市場熱力圖 | 手機版 | 手機多圖 |
+|---|---|---|---|
+| ![回測](docs/screenshots/backtest-zh.png) | ![熱力圖](docs/screenshots/heatmap-zh.png) | <img src="docs/screenshots/mobile-zh.jpg" width="180"> | <img src="docs/screenshots/mobile-multi-zh.jpg" width="180"> |
 
 ## 功能
 
@@ -43,7 +47,9 @@ python server.py        # 打開 http://localhost:8765
 - **條件提醒與自動模擬下單**：啟用的策略在交易時段每分鐘檢查（網頁關掉也會繼續），觸發時推播到 **Telegram／Discord／ntfy**，也可以自動在模擬倉下單
 - **選股器**：價格、漲跌幅、成交量、市值、本益比、殖利率、淨值比、產業，加上技術條件；結果可一鍵轉成策略
 - **市場熱力圖**：台股市值前 250、美股市值前 300，依產業分區
-- **多圖同框**：2×2／3×2／3×3
+- **AI 選股**：用日 K 因子（動能、多頭排列、距一年高點、量能、波動度…）替股票池（台股市值前 150、美股前 100）打分數；10 種候選策略 × 停損、持股數、調倉頻率、大盤濾網共 160 組設定做投資組合回測，依近 6 個月與 12 個月表現挑出最好的，並用「滾動樣本外測試」檢查是否過度擬合，頁面直接顯示有沒有贏過等權重全買與大盤；研究每週自動重跑
+- **AI 模擬倉**：跟自己的模擬倉同樣的介面與撮合規則，但完全分開；AI 依選出的策略在開盤時自動建倉、定期換股、停損，每筆交易附上入選理由
+- **多圖同框**：2×2／3×2／3×3，週期跟主圖一樣完整；只更新最後一根 K 棒，不會打亂縮放；手機版兩欄可捲動
 - **介面語言**：繁體中文／English，可用網址 `?lang=en` 指定；`#view=heatmap` 等可直接開到指定頁面
 - **右側面板**：最右邊的圖示選單切換行情、資訊（新聞／公告／營收／評級）、籌碼分布、模擬下單、筆記
 - **籌碼分布**：依日 K 與換手率估算成本分布，顯示獲利比例、平均成本、90%／70% 成本集中度（估算值，非真實持股資料）

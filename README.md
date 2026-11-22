@@ -35,7 +35,9 @@ python server.py        # then open http://localhost:8765
 | **Alerts & push** | Strategies are checked every minute during market hours (even with the page closed) · push to **Telegram**, **Discord** or **ntfy** · optional auto-trading in the paper account · simple price alerts too |
 | **Screener** | Fundamental filters (price, change, volume, market cap, P/E, yield, P/B, sector) + technical conditions · turn results into a strategy in one click |
 | **Heatmap** | Top 250 Taiwan / top 300 US stocks by market cap, grouped by sector |
-| **Multi-chart** | 2×2, 3×2 or 3×3 grid |
+| **AI picks** | Scores a universe (top 150 Taiwan / top 100 US by market cap) on daily-bar factors — momentum, trend alignment, distance from the 52-week high, volume, volatility · 10 candidate strategies × stop loss, holdings, rebalance frequency and a market filter (160 configurations) are portfolio-backtested; the winner is chosen on the last 6 and 12 months and checked with a walk-forward (out-of-sample) test, with the page stating plainly whether it beats the equal-weight universe and the index · research re-runs weekly |
+| **AI paper account** | Same interface and fills as your paper account but fully separate — the AI buys at the open, rotates on schedule and applies stop losses, logging the reason for every trade |
+| **Multi-chart** | 2×2, 3×2 or 3×3 grid with every chart period · live updates only touch the last bar, so your zoom stays put · two-column layout on phones |
 | **Global stocks** | Search and watch stocks from Japan, Korea, Hong Kong, China, Europe, India, Australia and more alongside your Taiwan/US lists — charts, key data and Chinese names for 70+ majors |
 | **Market data** | Global indices, futures, sector ETFs, FX, commodities, crypto · gainers/losers/volume movers · company profile, monthly revenue (TW), EPS, dividends, analyst targets (US), news, filings |
 | **Options** | TAIEX options chain (incl. weeklies) and US options chain, paper trading |
@@ -48,9 +50,13 @@ python server.py        # then open http://localhost:8765
 |---|---|
 | ![Backtest](docs/screenshots/backtest-en.png) | ![Heatmap](docs/screenshots/heatmap-us-en.png) |
 
-| Multi-chart | Mobile |
+| AI picks & validation | Multi-chart |
 |---|---|
-| ![Multi-chart](docs/screenshots/multi-en.png) | <img src="docs/screenshots/mobile-en.jpg" width="260"> |
+| ![AI picks](docs/screenshots/ai-en.png) | ![Multi-chart](docs/screenshots/multi-en.png) |
+
+| Mobile |
+|---|
+| <img src="docs/screenshots/mobile-en.jpg" width="260"> |
 
 ## Quick start
 

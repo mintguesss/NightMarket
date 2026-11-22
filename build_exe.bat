@@ -8,7 +8,8 @@ py -m PyInstaller --noconfirm --clean --onefile --windowed ^
   --name NightMarket ^
   --icon web\icons\app.ico ^
   --add-data "web;web" ^
-  --hidden-import server --hidden-import strategy ^
+  --add-data "tools\pick_research.py;tools" ^
+  --hidden-import server --hidden-import strategy --hidden-import picker ^
   launcher.pyw
 echo.
 echo 完成：dist\NightMarket.exe （模擬倉資料存在 %%LOCALAPPDATA%%\NightMarket）

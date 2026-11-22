@@ -153,6 +153,50 @@ const I18N_RULES = [
   [/^已切換到(台股|美股)$/, (m, a) => `Switched to ${a === '台股' ? 'Taiwan' : 'US'} stocks`],
   [/^(台股|美股)代號或名稱：(.+)$/, (m, a, b) => `${a === '台股' ? 'Taiwan' : 'US'} symbol or name: ${b}`],
 ];
+// AI 選股
+Object.assign(I18N_EN, {
+  'AI 選股': 'AI Picks', 'AI 模擬倉': 'AI paper account', '重新計算': 'Recompute', '立即調倉': 'Rebalance now', '重新研究': 'Re-run research',
+  '規則評分＋回測驗證挑出的策略，並用 AI 自己的模擬倉實際驗證。僅供研究，不構成投資建議。': 'Rule-based scoring with a backtest-selected strategy, forward-tested in the AI\'s own paper account. Research only, not investment advice.',
+  '目前策略': 'Current strategy', '參數': 'Parameters', '資料日期・股票池': 'Data date · universe', '自動交易中': 'Auto-trading', '已暫停': 'Paused',
+  '開盤後第一次建倉': 'First buys at the next open', '查看帳戶 ›': 'View account ›', '使用策略': 'Strategy', '今日建議': 'Today\'s picks', '驗證結果': 'Validation',
+  '滾動樣本外測試': 'Walk-forward (out-of-sample) test', 'AI 動作紀錄': 'AI activity log', '名次': 'Rank', '收盤': 'Close', '現價': 'Last', '近一月': '1M', '半年': '6M',
+  '入選理由': 'Why it was picked', '持有': 'Held', '策略（各自最佳參數）': 'Strategy (best parameters)', '近 3 月': '3M', '近 6 月': '6M', '近 12 月': '12M', '近 3 年': '3Y',
+  '近 12 月夏普': '12M Sharpe', '3 年最大回撤': '3Y max drawdown', '等權重全買股票池': 'Equal-weight universe', '選策略的日期': 'Selection date', '當時選中': 'Picked then',
+  '下一季': 'Next quarter', '等權重': 'Equal-weight', '台股市值前': 'Top Taiwan stocks by market cap:', '美股市值前': 'Top US stocks by market cap:', ' 檔': '',
+  '我的': 'Mine', '交易所時間': 'exchange time', '夜盤交易中': 'Overnight', '還沒有動作。開盤時 AI 會自動建倉，之後依調倉週期換股。': 'No activity yet. The AI buys at the next open and rotates on its rebalance schedule.',
+  'AI 還沒有持股：開盤時會依「AI 選股」頁的策略自動買進。': 'No AI holdings yet — it buys at the next open using the strategy on the AI Picks page.',
+  '策略與每日建議在「AI 選股」頁': 'Strategy and daily picks are on the AI Picks page', 'AI 自動管理，點一列切到該股票': 'Managed by the AI · click a row to open the chart',
+  // 策略名稱與說明
+  '半年動能': '6-month momentum', '12-1 動能': '12-1 momentum', '多頭排列＋季動能': 'Uptrend + 3M momentum', '一年新高突破': '52-week high breakout', '低波動動能': 'Low-vol momentum',
+  '多頭拉回': 'Uptrend pullback', '短線反轉': 'Short-term reversal', '量增轉強': 'Volume surge', '貼近新高': 'Near 52-week high', '綜合評分': 'Composite score',
+  '離一年高點最近、且在多頭排列': 'Closest to the 52-week high while in an uptrend', '近 5 天跌最多（均值回歸）': 'Biggest 5-day losers (mean reversion)',
+  '過去 120 天漲最多': 'Biggest 120-day gainers', '過去一年（扣掉最近一個月）漲最多': 'Biggest 12-month gainers, skipping the last month',
+  '股價 > 季線 > 半年線，挑近 60 天最強': 'Price > 60MA > 120MA, strongest over 60 days', '距一年高點 3% 內且量增，挑近 20 天最強': 'Within 3% of the 52-week high on rising volume, strongest over 20 days',
+  '半年報酬 ÷ 波動度，漲得穩的優先': '6-month return ÷ volatility', '長期多頭中 RSI 跌到 45 以下，挑短線跌最多': 'RSI below 45 inside a long-term uptrend',
+  '5 日均量 > 60 日均量 1.5 倍且上漲，挑近 20 天最強': '5-day volume > 1.5× 60-day volume and rising', '半年動能 + 月動能 + 多頭排列 − 波動度（各自排名後加總）': 'Ranks of 6M + 1M momentum + uptrend − volatility',
+  // 入選理由
+  '多頭排列（股價 > 季線 > 半年線）': 'Uptrend (price > 60MA > 120MA)', '、': ', ', '半年 ': '6M ', '近一月 ': '1M ', '貼近一年新高': 'near 52-week high', '量能放大 ': 'volume ', ' 倍': '×', '年化波動 ': 'ann. vol ',
+  // 參數
+  '持股 ': 'Hold ', '・每 ': ' · rebalance every ', ' 個交易日調倉': ' trading days', '・停損 ': ' · stop loss ', '・不設停損': ' · no stop loss', '・大盤跌破 200 日線就空手': ' · go to cash below the 200-day MA', '・不看大盤': ' · no market filter',
+  '自動：用研究第一名': 'Auto: research winner', '・': ' · ', ' 日': 'd', '無停損': 'no stop', '停損 ': 'stop ', '看大盤': 'market filter', '不看大盤': 'no market filter',
+});
+I18N_RULES.push(
+  [/^大盤（(\S+) ([\d.,]+)）在 200 日均線 ([\d.,]+) 之下，策略設定為空手，下次調倉會全部出場。$/, 'The market ($1 $2) is below its 200-day MA ($3), so the strategy goes to cash at the next rebalance.'],
+  [/^以 (\S+) 收盤資料評分，前 (\d+) 名為買進名單；排名掉出前 (\d+) 名才賣，減少換手$/, 'Scored on the $1 close · top $2 are bought · a holding is sold only after it drops out of the top $3'],
+  [/^研究於 (.+?)・(\d+) 檔・160 組設定(.*)$/, 'Research run $1 · $2 stocks · 160 configurations'],
+  [/^：只用當時以前的資料選策略、再看下一季的真實表現，串接 (\d+) 季累積$/, ': choosing the strategy with only the data available at the time, then holding it for the next quarter, compounded over $1 quarters: '],
+  [/^，贏過等權重全買 (\S+) 和大盤 (\S+)。$/, ', beating equal-weight $1 and the index $2.'],
+  [/^：串接 (\d+) 季累積 (\S+)，等權重全買 (\S+)、大盤 (\S+)。這個市場的選股優勢不明顯，建議只當參考。$/, ': compounded over $1 quarters $2 vs. equal-weight $3 and index $4. No clear edge in this market — treat the picks as reference only.'],
+  [/^上次調倉 (\S+)・已過 (\d+) 個交易日$/, 'Last rebalance $1 · $2 trading days ago'],
+  [/^理由：(.+)$/, (m, a) => 'Reason: ' + a],
+);
+Object.assign(I18N_EN, {
+  '樣本外有效': 'Works out of sample', '樣本外沒有贏': 'Does not win out of sample',
+  '選策略的方式：依近 6 個月與 12 個月的夏普值排名（滾動測試中比加入 3 個月或 3 年的版本好）；多數時段輸給等權重全買、或回撤超過 35% 的會被扣分。股票池用的是目前的大型股，回測報酬會偏高（倖存者偏差），所以重點看「有沒有贏等權重全買」。':
+    'How the strategy is chosen: ranked by Sharpe ratio over the last 6 and 12 months (this beat versions that also weigh 3 months or 3 years in the walk-forward test); configurations that lose to equal-weight in most windows or draw down more than 35% are penalized. The universe is today\'s large caps, so backtest returns are inflated by survivorship bias — what matters is whether it beats the equal-weight universe.',
+  '每一季只用當時以前的資料選出第一名，持有下一季': 'Each quarter, pick the winner using only past data, then hold it for the next quarter',
+  '數字顏色：贏等權重全買為紅（漲色），輸為綠（跌色）。滑鼠移到數字上可看超額報酬。': 'Colors: beats equal-weight in the up color, loses in the down color. Hover a number for the excess return.',
+});
 const I18N_SKIP = '.wname b, .nm b, .side-name, .news-item, .hm-c b, .mt-name, #topQuote b, .ann summary .t, .ev .tt, .sitem .n, .uchip, .st-ev b, .kv td, .summary, .hm-tip b, .wnote, .side-note, .st-item b, .tbl td.l .nm';
 const I18N_KEYS = Object.keys(I18N_EN).filter((k) => k.length >= 2).sort((a, b) => b.length - a.length);
 const CJK = /[\u4e00-\u9fff]/;

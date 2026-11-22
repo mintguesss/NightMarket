@@ -356,8 +356,10 @@ PAGES.paper = {
   load() { loadPaper(); if (state.sideTab !== 'trade') switchSideTab('trade'); },
   tick() { this.render(); },
   render() {
-    if (state.view !== 'paper' || !state.paper) return;
-    const a = state.paper, ccy = state.mkt === 'tw' ? 'TWD' : 'USD', mine = (c) => ccyOf(c) === ccy, dp = ccy === 'TWD' ? 0 : 2;
+    $$('#paperAcct button').forEach((b) => b.classList.toggle('active', b.dataset.acct === state.paperAcct));
+    const ai = state.paperAcct === 'ai';
+    if (state.view !== 'paper' || !(ai ? state.paperAI : state.paper)) return;
+    const a = ai ? state.paperAI : state.paper, ccy = state.mkt === 'tw' ? 'TWD' : 'USD', mine = (c) => ccyOf(c) === ccy, dp = ccy === 'TWD' ? 0 : 2;
     const fm = (v) => (dp ? fmtP(v) : fmtInt(v));
     const pos = Object.values(a.positions).filter((p) => mine(p.code)).map((p) => {
       const mult = p.mult || multOf(p.code), q = state.quotes[p.code], px = (isOpt(p.code) ? q?.bid || q?.price : q?.price) ?? p.cost / p.qty / mult;
@@ -379,22 +381,23 @@ PAGES.paper = {
         ${card('可用現金', fm(a.cash[ccy]), `持股市值 ${fm(mv)}`)}
       </div>
       ${state.mkt === 'us' ? '<div class="hint" style="padding:4px 16px">美股盤前（04:00–09:30）與盤後（16:00–20:00）時段只接受限價單，以延長時段價格撮合。</div>' : ''}
-      <div class="sec-title"><b>持倉</b><span>點一列切到該股票，按「賣出」帶入下單</span></div>
+      <div class="sec-title"><b>持倉</b><span>${ai ? 'AI 自動管理，點一列切到該股票' : '點一列切到該股票，按「賣出」帶入下單'}</span></div>
       ${pos.length ? `<table class="tbl"><thead><tr><th class="l">名稱</th><th>數量</th><th>均價</th><th>現價</th><th>市值</th><th>今日</th><th>未實現損益</th><th>報酬率</th><th></th></tr></thead><tbody>
         ${pos.map((p) => `<tr data-code="${esc(p.code)}"><td class="l">${nmCell(p.code, p.name)}</td><td class="num">${fmtInt(p.qty)}${isOpt(p.code) ? ' 口' : ''}</td><td class="num">${fmtP(p.avg)}</td>
           <td class="num ${cls(p.px - (state.quotes[p.code]?.prev ?? p.px))}">${fmtP(p.px)}</td><td class="num">${fmtP(p.mv)}</td><td class="num ${cls(p.dayChg)}">${sign(p.dayChg)}${fmtP(p.dayChg)}</td>
-          <td class="num ${cls(p.pnl)}">${sign(p.pnl)}${fmtP(p.pnl)}</td><td class="num ${cls(p.pnl)}">${sign(p.pct)}${p.pct.toFixed(2)}%</td><td><button class="act" data-sell="${esc(p.code)}" data-qty="${p.qty}">賣出</button></td></tr>`).join('')}</tbody></table>`
-        : '<div class="empty">還沒有持股。在右側「模擬下單」買進看看。</div>'}
+          <td class="num ${cls(p.pnl)}">${sign(p.pnl)}${fmtP(p.pnl)}</td><td class="num ${cls(p.pnl)}">${sign(p.pct)}${p.pct.toFixed(2)}%</td><td>${ai ? '' : `<button class="act" data-sell="${esc(p.code)}" data-qty="${p.qty}">賣出</button>`}</td></tr>`).join('')}</tbody></table>`
+        : `<div class="empty">${ai ? 'AI 還沒有持股：開盤時會依「AI 選股」頁的策略自動買進。' : '還沒有持股。在右側「模擬下單」買進看看。'}</div>`}
       <div class="sec-title"><b>委託中</b></div>
       ${pending.length ? `<table class="tbl"><thead><tr><th class="l">時間</th><th class="l">名稱</th><th>買賣</th><th>限價</th><th>數量</th><th>現價</th><th></th></tr></thead><tbody>
-        ${pending.map((o) => `<tr data-code="${esc(o.code)}"><td class="l num">${dt(o.created)}</td><td class="l">${nmCell(o.code, o.name)}</td><td>${side(o.side)}</td><td class="num">${fmtP(o.limit)}</td><td class="num">${fmtInt(o.qty)}</td><td class="num">${fmtP(state.quotes[o.code]?.price)}</td><td><button class="act" data-cancel="${o.id}">取消</button></td></tr>`).join('')}</tbody></table>`
+        ${pending.map((o) => `<tr data-code="${esc(o.code)}"><td class="l num">${dt(o.created)}</td><td class="l">${nmCell(o.code, o.name)}</td><td>${side(o.side)}</td><td class="num">${fmtP(o.limit)}</td><td class="num">${fmtInt(o.qty)}</td><td class="num">${fmtP(state.quotes[o.code]?.price)}</td><td>${ai ? '' : `<button class="act" data-cancel="${o.id}">取消</button>`}</td></tr>`).join('')}</tbody></table>`
         : '<div class="empty">沒有委託中的單</div>'}
       <div class="sec-title"><b>交易紀錄</b></div>
       ${done.length ? `<table class="tbl"><thead><tr><th class="l">時間</th><th class="l">名稱</th><th>買賣</th><th>類型</th><th>數量</th><th>成交價</th><th>手續費+稅</th><th>損益</th><th>狀態</th></tr></thead><tbody>
         ${done.map((o) => `<tr data-code="${esc(o.code)}"><td class="l num">${dt(o.doneAt || o.created)}</td><td class="l">${nmCell(o.code, o.name)}</td><td>${side(o.side)}</td><td>${o.type === 'market' ? '市價' : '限價 ' + fmtP(o.limit)}</td><td class="num">${fmtInt(o.qty)}</td>
           <td class="num">${o.fillPrice != null ? fmtP(o.fillPrice) : '--'}</td><td class="num">${o.fee != null ? fmtP((o.fee || 0) + (o.tax || 0)) : '--'}</td>
-          <td class="num ${cls(o.pnl || 0)}">${o.pnl != null ? sign(o.pnl) + fmtP(o.pnl) : ''}</td><td class="${o.status === 'rejected' ? 'down' : ''}">${stMap[o.status]}${o.reason ? '：' + esc(o.reason) : ''}</td></tr>`).join('')}</tbody></table>`
-        : '<div class="empty">還沒有交易紀錄</div>'}`;
+          <td class="num ${cls(o.pnl || 0)}">${o.pnl != null ? sign(o.pnl) + fmtP(o.pnl) : ''}</td><td class="${o.status === 'rejected' ? 'down' : ''}">${stMap[o.status]}${o.reason ? '：' + esc(o.reason) : ''}</td></tr>${o.note ? `<tr class="note-row"><td></td><td class="l muted small" colspan="8">理由：${esc(o.note)}</td></tr>` : ''}`).join('')}</tbody></table>`
+        : '<div class="empty">還沒有交易紀錄</div>'}
+      ${ai ? `<div class="sec-title"><b>AI 動作紀錄</b><span>策略與每日建議在「AI 選股」頁</span></div>${(a.log || []).length ? `<table class="tbl"><tbody>${a.log.filter((x) => x.mkt === state.mkt).slice(0, 60).map((x) => `<tr><td class="l num" style="width:110px">${dt(x.t)}</td><td class="l">${esc(x.msg)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">還沒有紀錄</div>'}` : ''}`;
   },
 };
 $('#paperBody').addEventListener('click', async (e) => {
@@ -410,11 +413,16 @@ $('#paperBody').addEventListener('click', async (e) => {
   }
   const r = e.target.closest('tr[data-code]'); if (r && !isOpt(r.dataset.code)) selectCode(r.dataset.code);
 });
+$('#paperAcct').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-acct]'); if (!b) return;
+  state.paperAcct = b.dataset.acct; store.set('tw.paperAcct', state.paperAcct); PAGES.paper.render(); loadPaper();
+});
 $('#paperReset').addEventListener('click', () => {
-  openModal('重設模擬帳戶', `<div class="hint" style="margin:0 0 12px">會清空<b>台股與美股</b>的所有持股、委託與紀錄。</div>
+  const acct = state.paperAcct;
+  openModal(acct === 'ai' ? '重設 AI 模擬帳戶' : '重設模擬帳戶', `<div class="hint" style="margin:0 0 12px">會清空${acct === 'ai' ? ' <b>AI 模擬倉</b>' : ''}<b>台股與美股</b>的所有持股、委託與紀錄。${acct === 'ai' ? '下次開盤 AI 會重新建倉。' : ''}</div>
     <div class="fld"><label>台股起始資金 (TWD)</label><input id="rsT" type="number" value="10000000"></div>
     <div class="fld"><label>美股起始資金 (USD)</label><input id="rsU" type="number" value="30000"></div>`,
-    [{ label: '取消' }, { label: '重設', cls: 'danger', act: async (m) => { const r = await post('/api/paper/reset', { TWD: +m.querySelector('#rsT').value, USD: +m.querySelector('#rsU').value }); toast(r.msg); loadPaper(); } }]);
+    [{ label: '取消' }, { label: '重設', cls: 'danger', act: async (m) => { const r = await post('/api/paper/reset', { acct, TWD: +m.querySelector('#rsT').value, USD: +m.querySelector('#rsU').value }); toast(r.msg); loadPaper(); } }]);
 });
 
 appInit();

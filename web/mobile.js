@@ -50,13 +50,15 @@
     globe: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>',
     theme: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 000 18z" fill="currentColor"/></svg>',
     index: '<svg viewBox="0 0 24 24"><path d="M3 17l5-6 4 3 6-8 3 3"/></svg>',
+    multi: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>',
   };
   const sheet = document.createElement('div'); sheet.className = 'msheet';
   const bd = document.createElement('div'); bd.className = 'msheet-bd';
   document.body.append(bd, sheet);
   function renderSheet() {
-    const tiles = [['heatmap', '熱力圖'], ['screener', '選股'], ['strategy', '策略回測'], ['options', '期權'], ['news', '資訊'], ['calendar', '日曆'], ['rank', '排行']]
+    const tiles = [['ai', 'AI 選股'], ['heatmap', '熱力圖'], ['screener', '選股'], ['strategy', '策略回測'], ['options', '期權'], ['news', '資訊'], ['calendar', '日曆'], ['rank', '排行']]
       .map(([v, n]) => `<button class="mtile" data-sv="${v}"><span class="ico">${icon(`[data-view="${v}"]`)}</span>${n}</button>`).join('') +
+      `<button class="mtile" data-sv="multi"><span class="ico">${SVG.multi}</span>多圖</button>` +
       `<button class="mtile" data-sa="index"><span class="ico">${SVG.index}</span>大盤走勢</button>`;
     const light = curTheme() === 'light';
     sheet.innerHTML = `<div class="grab"></div><div class="msheet-h">功能</div><div class="msheet-grid">${tiles}</div>

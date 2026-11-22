@@ -419,7 +419,10 @@ PAGES.multi = {
       m.drawn = code + '|' + period;
       m.chart.priceScale('right').applyOptions({ autoScale: true });
       if (P.line) m.chart.timeScale().fitContent();
-      else { const n = bars.length; m.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 80), to: n + 2 }); }
+      else {
+        const n = bars.length, fit = () => m.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 80), to: n + 2 });
+        fit(); setTimeout(fit, 80); // 剛建立的格子寬度可能還是 0（手機排版），排好後再設一次，不然會縮成一大段、最新K棒被切掉
+      }
     } catch (e) {
       console.warn('多圖載入失敗', code, e);
       if (full || !m.series.length) cell.querySelector('.mt-q').textContent = '載入失敗';
@@ -474,6 +477,86 @@ $('#mtGrid').addEventListener('change', (e) => {
   (async () => { if (codes[i]) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + encodeURIComponent(codes[i]))); } catch {} } PAGES.multi.update(i); })();
 });
 $('#mtGrid').addEventListener('click', (e) => { const b = e.target.closest('[data-open]'); if (!b) return; const m = mtState.charts[+b.closest('.mt-cell').dataset.i]; if (m?.code) { selectCode(m.code); setView('chart'); } });
+
+/* ---------- AI 選股 ---------- */
+const aiState = { picks: null, research: null, loading: false };
+const pctS = (v, d = 1) => (v == null || isNaN(v) ? '--' : `${v > 0 ? '+' : ''}${(+v).toFixed(d)}%`);
+const cfgText = (c) => c ? `持股 ${c.top} 檔・每 ${c.rebal} 個交易日調倉・${c.stop ? `停損 ${c.stop}%` : '不設停損'}・${c.regime ? '大盤跌破 200 日線就空手' : '不看大盤'}` : '';
+const STRAT_NAME = { mom6: '半年動能', mom12: '12-1 動能', trend_mom: '多頭排列＋季動能', breakout: '一年新高突破', lowvol_mom: '低波動動能', pullback: '多頭拉回', reversal: '短線反轉', vol_surge: '量增轉強', near_high: '貼近新高', composite: '綜合評分' };
+const idText = (id) => { const [s, t, r, sl, g] = id.split('|'); return `${STRAT_NAME[s] || s}・${t.replace('top', '')} 檔・${r.replace('r', '每 ')} 日・${sl === 'sl0' ? '無停損' : '停損 ' + sl.slice(2) + '%'}・${g === 'regime' ? '看大盤' : '不看大盤'}`; };
+PAGES.ai = {
+  async load(refresh = false) {
+    if (aiState.loading) return; aiState.loading = true;
+    if (!aiState.picks || aiState.picks.mkt !== state.mkt || refresh) $('#aiBody').innerHTML = '<div class="empty">計算中…第一次要抓股票池所有日K，約需 15～30 秒</div>';
+    try {
+      const [p, r] = await Promise.all([api(`/api/ai/picks?mkt=${state.mkt}${refresh ? '&refresh=1' : ''}`), api('/api/ai/research')]);
+      aiState.picks = p; aiState.research = r;
+    } catch (e) { $('#aiBody').innerHTML = `<div class="empty">載入失敗：${esc(e.message)}</div>`; return; }
+    finally { aiState.loading = false; }
+    const miss = (aiState.picks.rows || []).map((x) => x.code).filter((c) => !state.quotes[c]);
+    if (miss.length) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + miss.map(encodeURIComponent).join(','))); } catch {} }
+    this.render();
+  },
+  render() {
+    const p = aiState.picks, R = aiState.research || {}, res = R[state.mkt], st = R.status || {};
+    if (!p) return;
+    if (!p.ok) { $('#aiBody').innerHTML = `<div class="empty">${esc(p.msg || '計算失敗')}</div>`; return; }
+    const held = new Set(Object.keys(state.paperAI?.positions || {}));
+    const day = new Date(p.asof * 1000).toLocaleDateString('zh-TW');
+    const opts = [`<option value="auto" ${p.auto ? 'selected' : ''}>自動：用研究第一名${res ? '（' + idText(res.best_id) + '）' : ''}</option>`]
+      .concat((res?.top || []).map((t) => `<option value="${esc(t.id)}" ${!p.auto && t.id === [p.cfg.strat, 'top' + p.cfg.top, 'r' + p.cfg.rebal, 'sl' + p.cfg.stop, p.cfg.regime ? 'regime' : 'all'].join('|') ? 'selected' : ''}>${esc(idText(t.id))}</option>`)).join('');
+    const wf = res?.walk_forward, base = res?.base || {};
+    const W = ['3m', '6m', '12m', '3y'], WN = { '3m': '近 3 月', '6m': '近 6 月', '12m': '近 12 月', '3y': '近 3 年' };
+    const verdict = wf ? (wf.total > wf.ew_total && wf.total > wf.bench_total
+      ? `<span class="up">樣本外有效</span>：只用當時以前的資料選策略、再看下一季的真實表現，串接 ${wf.rows.length} 季累積 <b class="up">${pctS(wf.total)}</b>，贏過等權重全買 ${pctS(wf.ew_total)} 和大盤 ${pctS(wf.bench_total)}。`
+      : `<span class="down">樣本外沒有贏</span>：串接 ${wf.rows.length} 季累積 ${pctS(wf.total)}，等權重全買 ${pctS(wf.ew_total)}、大盤 ${pctS(wf.bench_total)}。這個市場的選股優勢不明顯，建議只當參考。`) : '';
+    $('#aiBody').innerHTML = `
+      <div class="cards">
+        <div class="card"><div class="k">目前策略</div><div class="v" style="font-size:18px">${esc(p.strat_name)}</div><div class="s">${esc(p.strat_desc)}</div></div>
+        <div class="card"><div class="k">參數</div><div class="s" style="margin-top:6px;line-height:1.6">${esc(cfgText(p.cfg))}</div></div>
+        <div class="card"><div class="k">資料日期・股票池</div><div class="v num" style="font-size:18px">${day}</div><div class="s">${state.mkt === 'tw' ? '台股市值前' : '美股市值前'} ${p.universe} 檔</div></div>
+        <div class="card"><div class="k">AI 模擬倉</div><div class="v" style="font-size:18px"><label class="chk big"><input type="checkbox" id="aiOn" ${p.enabled ? 'checked' : ''}> ${p.enabled ? '自動交易中' : '已暫停'}</label></div>
+          <div class="s">${p.last_rebal ? `上次調倉 ${esc(p.last_rebal)}・已過 ${p.days} 個交易日` : '開盤後第一次建倉'}　<a href="#" id="aiGoPaper">查看帳戶 ›</a></div></div>
+      </div>
+      <div class="ai-row"><label class="muted small">使用策略</label><select class="tsel" id="aiCfg">${opts}</select></div>
+      ${p.risk_off ? `<div class="ai-warn">大盤（${state.mkt === 'tw' ? '0050' : 'SPY'} ${fmtP(p.bench_px)}）在 200 日均線 ${fmtP(p.bench_ma200)} 之下，策略設定為空手，下次調倉會全部出場。</div>` : ''}
+      <div class="sec-title"><b>今日建議</b><span>以 ${day} 收盤資料評分，前 ${p.cfg.top} 名為買進名單；排名掉出前 ${p.cfg.top * 2} 名才賣，減少換手</span></div>
+      <table class="tbl"><thead><tr><th>名次</th><th class="l">名稱</th><th>收盤</th><th>現價</th><th>近一月</th><th>半年</th><th class="l">入選理由</th></tr></thead><tbody>
+        ${p.rows.map((r) => { const q = state.quotes[r.code]; return `<tr data-code="${esc(r.code)}" class="${r.rank <= p.cfg.top ? 'ai-in' : 'muted'}"><td class="num">${r.rank}${held.has(r.code) ? ' <span class="tag buy">持有</span>' : ''}</td><td class="l">${nmCell(r.code, r.name)}</td>
+          <td class="num">${fmtP(r.price)}</td><td class="num ${q ? cls(chgOf(q).d) : ''}">${q ? fmtP(q.price) : '--'}</td><td class="num ${cls(r.r20)}">${pctS(r.r20)}</td><td class="num ${cls(r.r120)}">${pctS(r.r120)}</td><td class="l small">${esc(r.reason)}</td></tr>`; }).join('')}</tbody></table>
+      <div class="sec-title"><b>驗證結果</b><span>${res ? `研究於 ${new Date(res.updated * 1000).toLocaleString('zh-TW')}・${res.universe} 檔・160 組設定` : '還沒有研究結果'}${st.running ? '・<b class="up">重新研究中…</b>' : st.msg ? '・' + esc(st.msg) : ''}</span></div>
+      ${res ? `<div class="ai-verdict">${verdict}<div class="muted small" style="margin-top:6px">選策略的方式：依近 6 個月與 12 個月的夏普值排名（滾動測試中比加入 3 個月或 3 年的版本好）；多數時段輸給等權重全買、或回撤超過 35% 的會被扣分。股票池用的是目前的大型股，回測報酬會偏高（倖存者偏差），所以重點看「有沒有贏等權重全買」。</div></div>
+        <table class="tbl"><thead><tr><th class="l">策略（各自最佳參數）</th>${W.map((w) => `<th>${WN[w]}</th>`).join('')}<th>近 12 月夏普</th><th>3 年最大回撤</th></tr></thead><tbody>
+          ${res.by_strat.map((b) => `<tr class="${b.strat === p.cfg.strat ? 'ai-in' : ''}"><td class="l"><b>${esc(b.name)}</b> <span class="muted small">${esc(b.desc)}</span></td>${W.map((w) => { const x = b.win[w] || {}; return `<td class="num ${cls(x.excess || 0)}" title="比等權重全買 ${pctS(x.excess)}">${pctS(x.ret)}</td>`; }).join('')}
+            <td class="num">${(b.win['12m']?.sharpe ?? 0).toFixed(2)}</td><td class="num down">${pctS(b.win['3y']?.mdd, 0)}</td></tr>`).join('')}
+          <tr class="muted"><td class="l">等權重全買股票池</td>${W.map((w) => `<td class="num">${pctS(base[w]?.ew?.ret)}</td>`).join('')}<td class="num">${(base['12m']?.ew?.sharpe ?? 0).toFixed(2)}</td><td class="num">${pctS(base['3y']?.ew?.mdd, 0)}</td></tr>
+          <tr class="muted"><td class="l">大盤（${state.mkt === 'tw' ? '0050' : 'SPY'}）</td>${W.map((w) => `<td class="num">${pctS(base[w]?.bench?.ret)}</td>`).join('')}<td class="num">${(base['12m']?.bench?.sharpe ?? 0).toFixed(2)}</td><td class="num">${pctS(base['3y']?.bench?.mdd, 0)}</td></tr></tbody></table>
+        <div class="muted small" style="padding:4px 16px">數字顏色：贏等權重全買為紅（漲色），輸為綠（跌色）。滑鼠移到數字上可看超額報酬。</div>
+        ${wf ? `<div class="sec-title"><b>滾動樣本外測試</b><span>每一季只用當時以前的資料選出第一名，持有下一季</span></div>
+        <table class="tbl"><thead><tr><th class="l">選策略的日期</th><th class="l">當時選中</th><th>下一季</th><th>等權重</th><th>大盤</th></tr></thead><tbody>
+          ${wf.rows.map((x) => `<tr><td class="l num">${new Date(x.from * 1000).toLocaleDateString('zh-TW')}</td><td class="l small">${esc(idText(x.pick))}</td><td class="num ${cls((x.ret || 0) - (x.ew || 0))}">${pctS(x.ret)}</td><td class="num">${pctS(x.ew)}</td><td class="num">${pctS(x.bench)}</td></tr>`).join('')}</tbody></table>` : ''}` : '<div class="empty">按右上角「重新研究」產生驗證結果（約 3～5 分鐘）</div>'}
+      <div class="sec-title"><b>AI 動作紀錄</b></div>
+      ${(p.log || []).length ? `<table class="tbl"><tbody>${p.log.map((x) => `<tr><td class="l num" style="width:120px">${new Date(x.t * 1000).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</td><td class="l">${esc(x.msg)}</td></tr>`).join('')}</tbody></table>` : '<div class="empty">還沒有動作。開盤時 AI 會自動建倉，之後依調倉週期換股。</div>'}`;
+  },
+};
+$('#aiBody').addEventListener('click', (e) => {
+  if (e.target.id === 'aiGoPaper') { e.preventDefault(); state.paperAcct = 'ai'; store.set('tw.paperAcct', 'ai'); setView('paper'); return; }
+  const r = e.target.closest('tr[data-code]'); if (r) { selectCode(r.dataset.code); setView('chart'); }
+});
+$('#aiBody').addEventListener('change', async (e) => {
+  if (e.target.id === 'aiOn') { const r = await post('/api/ai/config', { mkt: state.mkt, enabled: e.target.checked }); toast(r.enabled ? 'AI 模擬倉已啟用' : 'AI 模擬倉已暫停'); PAGES.ai.load(); }
+  if (e.target.id === 'aiCfg') {
+    const v = e.target.value; let cfg = 'auto';
+    if (v !== 'auto') { const [s, t, rb, sl, g] = v.split('|'); cfg = { strat: s, top: +t.slice(3), rebal: +rb.slice(1), stop: +sl.slice(2), regime: g === 'regime' }; }
+    await post('/api/ai/config', { mkt: state.mkt, cfg }); toast('策略已更新，下次調倉生效'); PAGES.ai.load(true);
+  }
+});
+$('#aiRefresh').addEventListener('click', () => PAGES.ai.load(true));
+$('#aiRun').addEventListener('click', async () => { const r = await post('/api/ai/run', { mkt: state.mkt }); toast(r.msg, 6000); loadPaper(); PAGES.ai.load(); });
+$('#aiResearch').addEventListener('click', async () => {
+  const r = await post('/api/ai/research/run', { mkt: 'all' }); toast(r.msg, 5000);
+  if (r.ok) { const t = setInterval(async () => { const x = await api('/api/ai/research').catch(() => null); if (x && !x.status?.running) { clearInterval(t); toast(x.status?.msg || '研究完成'); PAGES.ai.load(true); } }, 10000); }
+});
 
 /* ---------- 推播設定 ---------- */
 async function notifyPanel() {

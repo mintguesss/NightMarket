@@ -3,7 +3,8 @@
 # 執行：docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=你的密碼 -v nightmarket-data:/data nightmarket
 FROM python:3.12-slim
 WORKDIR /app
-COPY server.py strategy.py ./
+COPY server.py strategy.py picker.py ./
+COPY tools/pick_research.py ./tools/
 COPY web ./web
 ENV HOST=0.0.0.0 PORT=8765 TWSTOCK_DATA=/data PYTHONUNBUFFERED=1
 VOLUME /data

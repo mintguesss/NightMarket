@@ -85,7 +85,7 @@ const state = {
   list: [], listMap: {}, names: store.get('tw.names', {}),
   quotes: {}, sparks: {},
   bars: [], prev: null, off: 8 * 3600, sessionEnd: null, lastVol: null,
-  paper: null,
+  paper: null, paperAI: null, paperAcct: store.get('tw.paperAcct', 'me'),
   ticket: { side: 'buy', type: 'limit', unit: 1000, price: '', qty: 1 },
   magnet: store.get('tw.magnet2', false), // 預設關閉磁吸，畫線完全自由
   autoKinds: store.get('tw.autoDraw', []),
@@ -238,6 +238,15 @@ allCharts.forEach((c) => c.timeScale().subscribeVisibleLogicalRangeChange((r) =>
   if (syncing || !r) return; syncing = true; allCharts.forEach((o) => o !== c && o.timeScale().setVisibleLogicalRange(r)); syncing = false;
 }));
 
+// 圖表在看不見時（手機在自選清單頁、或切到其他頁）寬度是 0，這時設定的顯示範圍會壞掉（整段縮成一團、最新K棒被切掉）。
+// 從看不見變成看得見時，重新套用預設範圍
+let paneW = 0;
+new ResizeObserver(([e]) => {
+  const w = e.contentRect.width, was = paneW; paneW = w;
+  if (was >= 50 || w < 50 || !state.bars?.length) return;
+  if (PERIODS[state.period].line) mainChart.timeScale().fitContent();
+  else { const n = state.bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); }
+}).observe($('#chartMain'));
 const draw = new Drawings($('#paneMain'), mainChart, {
   series: () => primary, bars: () => state.bars, off: () => state.off, magnet: () => state.magnet,
   step: () => { const P = PERIODS[state.period]; return P.agg || STEP_OF[P.interval] || { '1d': 86400, '1wk': 604800, '1mo': 2629800 }[P.interval] || 0; },
@@ -979,7 +988,8 @@ $('#tabTrade').addEventListener('click', async (e) => {
 $('#tabTrade').addEventListener('input', (e) => { if (e.target.id === 'tkPrice') state.ticket.price = e.target.value; if (e.target.id === 'tkQty') state.ticket.qty = e.target.value; renderTicketInfo(); });
 async function loadPaper() {
   try { state.paper = await api('/api/paper'); } catch { return; }
-  const missing = Object.keys(state.paper.positions).filter((c) => !state.quotes[c]);
+  if (state.paperAcct === 'ai' && state.view === 'paper') { try { state.paperAI = await api('/api/paper?acct=ai'); } catch {} }
+  const missing = [...Object.keys(state.paper.positions), ...Object.keys(state.paperAI?.positions || {})].filter((c) => !state.quotes[c]);
   if (missing.length) { try { Object.assign(state.quotes, await api('/api/quote?codes=' + missing.map(encodeURIComponent).join(','))); } catch {} }
   if (state.view === 'paper') PAGES.paper.render(); renderTicketInfo();
 }
@@ -989,8 +999,8 @@ const PAGES = {}; // pages.js 註冊：{ load(), render?(), tick?() }
 function setView(v) {
   state.view = v;
   $$('#nav [data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
-  ['Chart', 'Market', 'Rank', 'Options', 'News', 'Calendar', 'Paper', 'Heatmap', 'Screener', 'Strategy', 'Multi'].forEach((n) => ($('#view' + n).hidden = n.toLowerCase() !== v));
-  $('#app').classList.toggle('full-view', ['calendar', 'heatmap', 'screener', 'strategy', 'multi'].includes(v)); // 這些頁面全寬
+  ['Chart', 'Market', 'Rank', 'Options', 'News', 'Calendar', 'Paper', 'Heatmap', 'Screener', 'Strategy', 'Multi', 'Ai'].forEach((n) => ($('#view' + n).hidden = n.toLowerCase() !== v));
+  $('#app').classList.toggle('full-view', ['calendar', 'heatmap', 'screener', 'strategy', 'multi', 'ai'].includes(v)); // 這些頁面全寬
   setTimeout(() => draw.resize(), 60);
   if (v === 'chart') { draw.resize(); } else PAGES[v]?.load();
   if (v !== 'multi') PAGES.multi?.leave?.();

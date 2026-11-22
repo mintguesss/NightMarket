@@ -43,6 +43,7 @@ DEFAULT_DATA = (os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduse
                 if FROZEN else os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("TWSTOCK_DATA", DEFAULT_DATA)
 PAPER_FILE = os.path.join(DATA_DIR, "paper.json")
+PAPER_AI_FILE = os.path.join(DATA_DIR, "paper_ai.json")  # AI 自己的模擬倉，跟使用者的分開
 TW = timezone(timedelta(hours=8))
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36"
 POOL = ThreadPoolExecutor(12)
@@ -711,19 +712,24 @@ def paper_new(cash=None):
             "realized": {"TWD": 0.0, "USD": 0.0}, "created": int(time.time())}
 
 
-def paper_load():
+def _paper_file(acct="me"):
+    return PAPER_AI_FILE if acct == "ai" else PAPER_FILE
+
+
+def paper_load(acct="me"):
     try:
-        with open(PAPER_FILE, encoding="utf-8") as f:
+        with open(_paper_file(acct), encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
         return paper_new()
 
 
-def paper_save(acc):
-    tmp = PAPER_FILE + ".tmp"
+def paper_save(acc, acct="me"):
+    path = _paper_file(acct)
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(acc, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, PAPER_FILE)
+    os.replace(tmp, path)
 
 
 def ccy_of(code):
@@ -784,7 +790,7 @@ def _fill(acc, o, price):
     o.update(status="filled", fillPrice=price, fee=fee, tax=tax, doneAt=int(time.time()))
 
 
-def paper_order(body):
+def paper_order(body, acct="me"):
     code = str(body.get("code", "")).strip()
     side = body.get("side")
     otype = body.get("type", "market")
@@ -799,8 +805,10 @@ def paper_order(body):
         return {"ok": False, "msg": "抓不到這檔的報價"}
     o = {"id": uuid.uuid4().hex[:10], "code": code, "name": q.get("name") or code, "side": side, "type": otype,
          "qty": qty, "limit": limit, "ccy": ccy_of(code), "status": "pending", "created": int(time.time())}
+    if body.get("note"):
+        o["note"] = str(body["note"])[:300]
     with _paper_lock:
-        acc = paper_load()
+        acc = paper_load(acct)
         is_opt = code.startswith("OPT.")
         if is_opt:  # 選擇權：買用賣價、賣用買價成交
             price = (q.get("ask") if side == "buy" else q.get("bid")) or q["price"]
@@ -826,18 +834,18 @@ def paper_order(body):
             _fill(acc, o, price)  # 美股盤前/盤後時段限價單也可成交（用延長時段價格）
         acc["orders"].insert(0, o)
         acc["orders"] = acc["orders"][:500]
-        paper_save(acc)
+        paper_save(acc, acct)
     msg = {"filled": f"成交 @ {o.get('fillPrice')}", "pending": "已委託，等待成交", "rejected": o.get("reason", "")}[o["status"]]
     return {"ok": o["status"] != "rejected", "msg": msg, "order": o}
 
 
-def paper_cancel(oid):
+def paper_cancel(oid, acct="me"):
     with _paper_lock:
-        acc = paper_load()
+        acc = paper_load(acct)
         for o in acc["orders"]:
             if o["id"] == oid and o["status"] == "pending":
                 o.update(status="cancelled", doneAt=int(time.time()))
-                paper_save(acc)
+                paper_save(acc, acct)
                 return {"ok": True, "msg": "已取消"}
     return {"ok": False, "msg": "找不到可取消的委託"}
 
@@ -846,16 +854,22 @@ def paper_matcher():
     """背景撮合限價單：每 5 秒檢查一次。"""
     while True:
         time.sleep(5)
+        for acct in ("me", "ai"):
+            _match_once(acct)
+
+
+def _match_once(acct):
+    if True:
         try:
             with _paper_lock:
-                acc = paper_load()
+                acc = paper_load(acct)
                 pend = [o for o in acc["orders"] if o["status"] == "pending"]
             if not pend:
-                continue
+                return
             qs = quotes(list({o["code"] for o in pend}))
             changed = False
             with _paper_lock:
-                acc = paper_load()
+                acc = paper_load(acct)
                 for o in acc["orders"]:
                     if o["status"] != "pending":
                         continue
@@ -872,7 +886,7 @@ def paper_matcher():
                         _fill(acc, o, p)
                         changed = True
                 if changed:
-                    paper_save(acc)
+                    paper_save(acc, acct)
         except Exception as e:
             print("matcher error:", e, file=sys.stderr)
 
@@ -2026,6 +2040,262 @@ def strategy_monitor():
             print("summary error:", e, file=sys.stderr)
 
 
+# ---------------- AI 選股與 AI 模擬倉 ----------------
+import picker as PK  # noqa: E402
+
+AI_FILE = os.path.join(DATA_DIR, "ai.json")          # AI 狀態：設定、上次調倉
+RESEARCH_FILE = os.path.join(DATA_DIR, "ai_research.json")  # tools/pick_research.py 的研究結果
+AI_UNIVERSE = {"tw": 150, "us": 100}
+AI_FALLBACK = {"strat": "composite", "top": 10, "rebal": 5, "stop": 10, "regime": True}
+_ai_lock = threading.RLock()
+
+
+def ai_universe(mkt):
+    """股票池：台股市值前 150 檔（不含 ETF）、美股市值前 100 檔。"""
+    if mkt == "tw":
+        rows = [r for r in tw_snapshot() if r.get("mcap") and r.get("industry") not in ("ETF", "存託憑證") and not r["code"].startswith("00")]
+    else:
+        rows = [r for r in us_snapshot() if r.get("mcap") and "." not in r["code"][3:] and "-" not in r["code"][3:]]
+    rows.sort(key=lambda r: -r["mcap"])
+    return [r["code"] for r in rows[:AI_UNIVERSE[mkt]]]
+
+
+def ai_research():
+    try:
+        with open(RESEARCH_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def ai_state():
+    try:
+        with open(AI_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def ai_state_save(st):
+    tmp = AI_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, AI_FILE)
+
+
+def ai_state_reset():
+    with _ai_lock:
+        st = ai_state()
+        for m in ("tw", "us"):
+            st.setdefault(m, {}).update(last_rebal=None, days=0, seen=None)
+        ai_state_save(st)
+
+
+def ai_cfg(mkt):
+    """目前使用的策略：使用者有指定就用指定的，否則用研究結果第一名。"""
+    st = ai_state().get(mkt, {})
+    cfg = st.get("cfg") or (ai_research().get(mkt) or {}).get("best") or AI_FALLBACK
+    return {k: cfg[k] for k in ("strat", "top", "rebal", "stop", "regime") if k in cfg}
+
+
+def ai_enabled(mkt):
+    return ai_state().get(mkt, {}).get("enabled", True)
+
+
+def ai_config_set(body):
+    mkt = body.get("mkt", "tw")
+    with _ai_lock:
+        st = ai_state(); m = st.setdefault(mkt, {})
+        if "enabled" in body:
+            m["enabled"] = bool(body["enabled"])
+        if body.get("cfg") == "auto":
+            m.pop("cfg", None)
+        elif isinstance(body.get("cfg"), dict) and body["cfg"].get("strat") in PK.STRATS:
+            m["cfg"] = {k: body["cfg"][k] for k in ("strat", "top", "rebal", "stop", "regime") if k in body["cfg"]}
+        ai_state_save(st)
+    return {"ok": True, "msg": "已儲存", "cfg": ai_cfg(mkt), "enabled": ai_enabled(mkt)}
+
+
+def _completed(bars, mkt):
+    """盤中最後一根是今天還沒收完的K棒，打分數只用收完的。"""
+    if bars and _market_open(mkt):
+        tz = TW if mkt == "tw" else timezone(timedelta(hours=-4 if _us_dst_now() else -5))
+        today = datetime.now(tz).date()
+        if datetime.fromtimestamp(bars[-1]["t"], tz).date() == today:
+            return bars[:-1]
+    return bars
+
+
+def ai_compute(mkt):
+    """抓股票池日K、算因子、依目前策略排名。結果快取 20 分鐘。"""
+    def load():
+        codes = ai_universe(mkt)
+        from concurrent.futures import ThreadPoolExecutor
+
+        def one(c):
+            try:
+                return c, _completed(_daily(c, 2), mkt)
+            except Exception:
+                return c, None
+        with ThreadPoolExecutor(6) as ex:
+            data = {c: b for c, b in ex.map(one, codes) if b and len(b) > 260}
+        bench = _completed(_daily(DEFAULT_BENCH[mkt], 2), mkt)
+        feats = {c: PK.features(b)[-1] for c, b in data.items()}
+        last_t = max((b[-1]["t"] for b in data.values()), default=0)
+        feats = {c: f for c, f in feats.items() if f and data[c][-1]["t"] >= last_t - 5 * 86400}  # 停牌太久的不選
+        bc = [b["c"] for b in bench]
+        ma200 = sum(bc[-200:]) / 200 if len(bc) >= 200 else None
+        return {"feats": feats, "asof": bench[-1]["t"] if bench else last_t, "risk_off": bool(ma200 and bc[-1] < ma200),
+                "bench_px": bc[-1] if bc else None, "bench_ma200": ma200, "n": len(data)}
+    return cached("ai:" + mkt, 1200, load)
+
+
+def ai_picks_api(mkt, refresh=False):
+    if refresh:
+        _cache.pop("ai:" + mkt, None)
+    try:
+        d = ai_compute(mkt)
+    except Exception as e:
+        return {"ok": False, "msg": f"計算失敗：{e}"}
+    cfg = ai_cfg(mkt)
+    ranked = PK.pick(d["feats"], cfg["strat"], 0)
+    top = cfg["top"]
+    rows = [{"code": c, "name": zh_name(c, None), "score": sc, "rank": i + 1, "price": d["feats"][c]["c"], "reason": PK.reasons(d["feats"][c]),
+             "r20": d["feats"][c]["r20"] * 100, "r120": d["feats"][c]["r120"] * 100} for i, (c, sc) in enumerate(ranked[:max(20, top * 2)])]
+    st = ai_state().get(mkt, {})
+    return {"ok": True, "mkt": mkt, "asof": d["asof"], "cfg": cfg, "strat_name": PK.STRATS[cfg["strat"]]["name"], "strat_desc": PK.STRATS[cfg["strat"]]["desc"],
+            "risk_off": d["risk_off"] and cfg.get("regime"), "bench_px": d["bench_px"], "bench_ma200": d["bench_ma200"], "universe": d["n"],
+            "rows": rows, "enabled": ai_enabled(mkt), "auto": not st.get("cfg"), "last_rebal": st.get("last_rebal"), "days": st.get("days", 0),
+            "log": [x for x in paper_load("ai").get("log", []) if x.get("mkt") == mkt][:50]}
+
+
+def _ai_log(acc, mkt, msg):
+    acc.setdefault("log", []).insert(0, {"t": int(time.time()), "mkt": mkt, "msg": msg})
+    acc["log"] = acc["log"][:300]
+
+
+def ai_run(mkt, force=False):
+    """AI 模擬倉：開盤中每分鐘檢查。新交易日且到了調倉日就換股；持股跌破停損就賣。"""
+    if not force and not ai_enabled(mkt):
+        return {"ok": False, "msg": "AI 模擬倉已暫停"}
+    if not _market_open(mkt):
+        return {"ok": False, "msg": "目前不是交易時段，開盤後 AI 會自動調倉"}
+    cfg = ai_cfg(mkt); ccy = "TWD" if mkt == "tw" else "USD"
+    d = ai_compute(mkt)
+    sig = time.strftime("%Y-%m-%d", time.gmtime(d["asof"] + (8 * 3600 if mkt == "tw" else 0)))
+    msgs = []
+    with _ai_lock:
+        st = ai_state(); ms = st.setdefault(mkt, {})
+        acc = paper_load("ai")
+        held = {c: p for c, p in acc["positions"].items() if p["ccy"] == ccy and not c.startswith("OPT.")}
+        qs = quotes(list(held)) if held else {}
+        # 1) 停損
+        stop = (cfg.get("stop") or 0) / 100
+        for c, p in list(held.items()):
+            q = qs.get(c) or {}
+            avg = p["cost"] / p["qty"] if p["qty"] else 0
+            if stop and q.get("price") and avg and q["price"] <= avg * (1 - stop):
+                r = paper_order({"code": c, "side": "sell", "type": "market", "qty": p["qty"], "note": f"停損：跌破成本 {cfg['stop']}%"}, "ai")
+                msgs.append(f"停損賣出 {zh_name(c, None)} {p['qty']} 股：{r.get('msg')}")
+                held.pop(c, None)
+        # 2) 調倉日判斷：每個新的交易日計數 +1，到了 rebal 天數（或第一次、或強制）就換股
+        new_day = ms.get("seen") != sig
+        if new_day:
+            ms["seen"] = sig; ms["days"] = ms.get("days", 0) + 1
+        due = force or not ms.get("last_rebal") or (new_day and ms["days"] >= cfg["rebal"])
+        if due:
+            ranked = PK.pick(d["feats"], cfg["strat"], 0)
+            top = cfg["top"]
+            if cfg.get("regime") and d["risk_off"]:
+                target, why_out = [], "大盤跌破 200 日均線，全部出場空手"
+            else:
+                keep = {c for c, _ in ranked[:top * 2]}
+                hold = [c for c in held if c in keep][:top]
+                target = hold + [c for c, _ in ranked if c not in hold][:top - len(hold)]
+                why_out = f"跌出前 {top * 2} 名"
+            rank_of = {c: i + 1 for i, (c, _) in enumerate(ranked)}
+            for c, p in list(held.items()):
+                if c not in target:
+                    r = paper_order({"code": c, "side": "sell", "type": "market", "qty": p["qty"], "note": f"{why_out}（目前第 {rank_of.get(c, '-')} 名）"}, "ai")
+                    msgs.append(f"賣出 {zh_name(c, None)}：{r.get('msg')}")
+            acc = paper_load("ai")
+            held = {c: p for c, p in acc["positions"].items() if p["ccy"] == ccy}
+            new = [c for c in target if c not in held]
+            if new:
+                qs = quotes(list(set(new) | set(held)))
+                value = acc["cash"][ccy] + sum(p["qty"] * (qs.get(c) or {}).get("price", 0) for c, p in held.items())
+                slot = value / top
+                for c in new:
+                    px = (qs.get(c) or {}).get("price")
+                    if not px:
+                        continue
+                    budget = min(slot, paper_load("ai")["cash"][ccy] * 0.995)
+                    if mkt == "tw":
+                        lots = int(budget / (px * 1000 * 1.002))
+                        qty = lots * 1000 if lots >= 1 else int(budget / (px * 1.002))
+                    else:
+                        qty = int(budget / px)
+                    if qty <= 0:
+                        continue
+                    f = d["feats"].get(c)
+                    note = f"{PK.STRATS[cfg['strat']]['name']} 第 {rank_of.get(c)} 名：" + (PK.reasons(f) if f else "")
+                    r = paper_order({"code": c, "side": "buy", "type": "market", "qty": qty, "note": note}, "ai")
+                    msgs.append(f"買進 {zh_name(c, None)} {qty} 股：{r.get('msg')}")
+            ms["last_rebal"] = sig; ms["days"] = 0
+            if not msgs:
+                msgs.append("調倉檢查：持股不變")
+        ai_state_save(st)
+        if msgs:
+            acc = paper_load("ai")
+            for m in msgs:
+                _ai_log(acc, mkt, m)
+            paper_save(acc, "ai")
+    return {"ok": True, "msg": "；".join(msgs) or "沒有需要調整的部位"}
+
+
+_research = {"running": False, "msg": ""}
+
+
+def ai_research_run(which="all"):
+    """背景重新跑策略研究（約 3～5 分鐘）。"""
+    if _research["running"]:
+        return {"ok": False, "msg": "研究正在進行中"}
+
+    def go():
+        _research.update(running=True, msg="研究中…")
+        try:
+            sys.path.insert(0, os.path.join(ROOT, "tools"))
+            import pick_research
+            pick_research.run_all(which)
+            _research["msg"] = "研究完成"
+            for m in ("tw", "us"):
+                _cache.pop("ai:" + m, None)
+        except Exception as e:
+            _research["msg"] = f"研究失敗：{e}"
+        finally:
+            _research["running"] = False
+    threading.Thread(target=go, daemon=True).start()
+    return {"ok": True, "msg": "開始重新研究，約需 3～5 分鐘"}
+
+
+def ai_trader():
+    time.sleep(30)
+    while True:
+        try:  # 研究結果超過 7 天就自動重跑（週末市場關閉時跑最剛好，但沒跑過也會補）
+            r = ai_research()
+            if not _research["running"] and (not r or time.time() - min((r.get(m) or {}).get("updated", 0) for m in ("tw", "us")) > 7 * 86400):
+                ai_research_run()
+        except Exception as e:
+            print("ai research error:", e, file=sys.stderr)
+        for mkt in ("tw", "us"):
+            try:
+                if ai_enabled(mkt) and _market_open(mkt):
+                    ai_run(mkt)
+            except Exception as e:
+                print("ai trader error:", mkt, e, file=sys.stderr)
+        time.sleep(60)
+
+
 # ---------------- 市場快照（選股、熱力圖） ----------------
 TW_INDUSTRY = {"01": "水泥", "02": "食品", "03": "塑膠", "04": "紡織纖維", "05": "電機機械", "06": "電器電纜", "08": "玻璃陶瓷", "09": "造紙",
                "10": "鋼鐵", "11": "橡膠", "12": "汽車", "14": "建材營造", "15": "航運", "16": "觀光餐旅", "17": "金融保險", "18": "貿易百貨",
@@ -2271,7 +2541,11 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(calendar(q.get("date") or datetime.now(TW).strftime("%Y-%m-%d")))
             elif u.path == "/api/paper":
                 with _paper_lock:
-                    self.send_json(paper_load())
+                    self.send_json(paper_load(q.get("acct", "me")))
+            elif u.path == "/api/ai/picks":
+                self.send_json(ai_picks_api(q.get("mkt", "tw"), q.get("refresh") == "1"))
+            elif u.path == "/api/ai/research":
+                self.send_json({**ai_research(), "status": _research})
             else:
                 self.send_json({"error": "not found"}, 404)
         except Exception as e:
@@ -2306,13 +2580,25 @@ class Handler(SimpleHTTPRequestHandler):
             elif u.path == "/api/notify/send":
                 self.send_json({"result": push(body.get("title") or "提醒", body.get("text") or "")})
             elif u.path == "/api/paper/order":
-                self.send_json(paper_order(body))
+                if body.get("acct") == "ai":
+                    self.send_json({"ok": False, "msg": "AI 模擬倉只由 AI 自己下單"})
+                else:
+                    self.send_json(paper_order(body))
             elif u.path == "/api/paper/cancel":
-                self.send_json(paper_cancel(body.get("id")))
+                self.send_json(paper_cancel(body.get("id"), body.get("acct", "me")))
+            elif u.path == "/api/ai/config":
+                self.send_json(ai_config_set(body))
+            elif u.path == "/api/ai/research/run":
+                self.send_json(ai_research_run(body.get("mkt", "all")))
+            elif u.path == "/api/ai/run":
+                self.send_json(ai_run(body.get("mkt", "tw"), force=True))
             elif u.path == "/api/paper/reset":
                 cash = {"TWD": float(body.get("TWD") or DEFAULT_CASH["TWD"]), "USD": float(body.get("USD") or DEFAULT_CASH["USD"])}
                 with _paper_lock:
-                    paper_save(paper_new(cash))
+                    acct = body.get("acct", "me")
+                    paper_save(paper_new(cash), acct)
+                    if acct == "ai":
+                        ai_state_reset()
                 self.send_json({"ok": True, "msg": "模擬帳戶已重設"})
             else:
                 self.send_json({"error": "not found"}, 404)
@@ -2325,6 +2611,7 @@ def start(port=PORT, host=None):
     threading.Thread(target=stock_list, daemon=True).start()
     threading.Thread(target=paper_matcher, daemon=True).start()
     threading.Thread(target=strategy_monitor, daemon=True).start()
+    threading.Thread(target=ai_trader, daemon=True).start()
     srv = ThreadingHTTPServer((host or HOST, port), Handler)
     return srv
 
