@@ -20,7 +20,7 @@ import picker as PK  # noqa: E402
 import server as S  # noqa: E402
 
 BENCH = {"tw": "0050", "us": "US.SPY"}
-GRID = {"strat": list(PK.STRATS), "top": [5, 10], "rebal": [5, 20], "stop": [0, 10], "regime": [False, True]}
+GRID = {"strat": list(PK.STRATS), "top": [5, 10], "rebal": [5, 20], "stop": [0, 10], "regime": list(PK.REGIMES)}
 LEN = {"1m": 21, "3m": 63, "6m": 126, "12m": 252, "3y": 756}
 WINDOWS = [(k, v, 0.2) for k, v in LEN.items()]  # 顯示用的時間窗
 # 選策略用的評分（看哪些期間）與多久重選一次：各市場不同，由 tools/meta_research.py 的交叉測試決定（ai_meta.json）
@@ -77,7 +77,7 @@ def configs():
 
 
 def cfg_id(c):
-    return f"{c['strat']}|top{c['top']}|r{c['rebal']}|sl{c['stop']}|{'regime' if c['regime'] else 'all'}"
+    return f"{c['strat']}|top{c['top']}|r{c['rebal']}|sl{c['stop']}|{PK.regime_mode(c['regime'])}"
 
 
 def evaluate(mkt, data, feats, bench, end_i, windows=WINDOWS, cfgs=None):
@@ -121,6 +121,63 @@ def score(res, windows=WINDOWS):
     return sorted(ids, key=lambda i: -total[i]), total
 
 
+# ---------------- 壓力測試（找「最不容易壞」而不是「紙上賺最多」的策略） ----------------
+STRESS_SLIP = 0.003  # 每邊 0.3% 滑價＝預設成本的三倍
+
+
+def yearly(pts):
+    """逐年報酬：{年: 報酬}，只算有 60 個交易日以上的年份。"""
+    by, prev, out = {}, None, {}
+    for t, v in pts:
+        by.setdefault(time.gmtime(t).tm_year, []).append(v)
+    for y in sorted(by):
+        vs = by[y]; base = prev if prev else vs[0]
+        if len(vs) >= 60 and base:
+            out[y] = vs[-1] / base - 1
+        prev = vs[-1]
+    return out
+
+
+def neighbors(i, ids):
+    """參數鄰居：同策略、同大盤濾網，只差持股數、調倉頻率或停損其中一項。"""
+    a = i.split("|")
+    return [j for j in ids if j != i and (b := j.split("|"))[0] == a[0] and b[4] == a[4] and sum(x != y for x, y in zip(a[1:4], b[1:4])) == 1]
+
+
+def robust_choose(mkt, data, feats, bench, end_i, res, wins, topk=20):
+    """依評分由高到低檢查，第一個通過四項壓力測試的就採用：
+    1. 成本加重（每邊滑價 0.3%）後，近 3 年仍贏等權重全買
+    2. 逐年看，至少一半的年份贏等權重全買（不靠一兩段大行情）
+    3. 參數鄰居的平均評分沒有明顯比較差（是一片高原，不是剛好的尖峰）
+    4. 近 3 年至少 30 筆出場交易（樣本夠）
+    都沒有全部通過，就用通過項目最多的（同分取評分高的），並標示「未全部通過」。"""
+    order, total = score(res, wins)
+    st, et = bench[max(0, end_i - 756)]["t"], bench[end_i]["t"]
+    ew = PK.ew_equity(data, st, et); ew_ret = PK.stats(ew).get("ret", 0); ew_y = yearly(ew)
+    checks = {}
+    for i in order[:topk]:
+        r = PK.portfolio_backtest(data, feats, bench, dict(res[i]["cfg"], slip=STRESS_SLIP), st, et)
+        if not r:
+            continue
+        sr = PK.stats(r["equity"]).get("ret", 0); y = yearly(r["equity"])
+        yrs = [k for k in y if k in ew_y]; beat = sum(1 for k in yrs if y[k] > ew_y[k])
+        nb = neighbors(i, res)
+        nb_avg = sum(total[j] for j in nb) / len(nb) if nb else total[i]
+        ck = {"stress_ret": sr, "stress_excess": sr - ew_ret, "years": len(yrs), "years_beat": beat, "trades": len(r["closed"]),
+              "nb_avg": nb_avg, "score": total[i],
+              "yearly": {str(k): [y[k] * 100, ew_y[k] * 100] for k in yrs}}
+        ck["pass"] = {"cost": ck["stress_excess"] > 0, "years": bool(yrs) and beat * 2 >= len(yrs),
+                      "neighbors": nb_avg >= total[i] - 0.2, "trades": ck["trades"] >= 30}
+        ck["ok"] = all(ck["pass"].values())
+        checks[i] = ck
+        if ck["ok"]:
+            return i, checks, order, total
+    if not checks:
+        return order[0], checks, order, total
+    best = max(checks, key=lambda i: (sum(checks[i]["pass"].values()), total[i]))
+    return best, checks, order, total
+
+
 def walk_forward(mkt, data, feats, bench, steps=6, hold=63, wins=None, log=True):
     """滾動樣本外：在每個時間點只用過去資料選出第一名，持有下一季，最後串起來看真實表現。"""
     wins = wins or select_windows(mkt)
@@ -133,7 +190,7 @@ def walk_forward(mkt, data, feats, bench, steps=6, hold=63, wins=None, log=True)
         if sel_end < 300:
             continue
         res, _ = evaluate(mkt, data, feats, bench, sel_end, wins)
-        best = score(res, wins)[0][0]
+        best = robust_choose(mkt, data, feats, bench, sel_end, res, wins)[0]
         cfg = res[best]["cfg"]
         r = PK.portfolio_backtest(data, feats, bench, cfg, bench[sel_end]["t"], bench[test_end]["t"])
         s = PK.stats(r["equity"]) if r else {}
@@ -155,7 +212,10 @@ def run(mkt):
     print(f"[{mkt}] 有資料 {len(data)} 檔，開始回測 {len(list(configs()))} 組設定 × {len(WINDOWS)} 個時間窗")
     res, base = evaluate(mkt, data, feats, bench, len(bench) - 1)
     meth = method(mkt)
-    order, total = score(res, select_windows(mkt))
+    best, checks, order, total = robust_choose(mkt, data, feats, bench, len(bench) - 1, res, select_windows(mkt))
+    for i, ck in checks.items():
+        print(f"  壓力測試 {i:38s} {'通過' if ck['ok'] else '未通過'}  成本加重後超額 {ck['stress_excess']:+.1f}%  逐年 {ck['years_beat']}/{ck['years']}  鄰居 {ck['nb_avg']:.2f}/{ck['score']:.2f}  交易 {ck['trades']}")
+    print(f"[{mkt}] 採用 {best}")
     print(f"[{mkt}] 前 10 名（{time.time() - t0:.0f} 秒）")
     for i in order[:10]:
         w = res[i]["win"]
@@ -172,7 +232,8 @@ def run(mkt):
     for i in order:
         k = res[i]["cfg"]["strat"]
         by_strat.setdefault(k, {"id": i, "score": total[i], "win": res[i]["win"]})
-    return {"mkt": mkt, "updated": int(time.time()), "universe": len(data), "method": meth, "best": res[order[0]]["cfg"], "best_id": order[0],
+    return {"mkt": mkt, "updated": int(time.time()), "universe": len(data), "method": meth, "n_cfgs": len(res), "best": res[best]["cfg"], "best_id": best,
+            "robust": checks.get(best), "robust_ok": bool(checks.get(best, {}).get("ok")), "checked": checks,
             "top": [{"id": i, "score": total[i], "cfg": res[i]["cfg"], "win": res[i]["win"]} for i in order[:15]],
             "by_strat": [{"strat": k, "name": PK.STRATS[k]["name"], "desc": PK.STRATS[k]["desc"], **v} for k, v in by_strat.items()],
             "base": base, "walk_forward": wf}
@@ -180,12 +241,14 @@ def run(mkt):
 
 def run_all(which="all"):
     path = os.path.join(S.DATA_DIR, "ai_research.json")
-    try:
-        out = json.load(open(path, encoding="utf-8"))
-    except (OSError, ValueError):
-        out = {}
+    out = {}
     for m in (["tw", "us"] if which == "all" else [which]):
-        out[m] = run(m)
+        r = run(m)
+        try:  # 寫入前重新讀檔再合併：台股、美股可能同時在跑
+            out = json.load(open(path, encoding="utf-8"))
+        except (OSError, ValueError):
+            out = {}
+        out[m] = r
         json.dump(out, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("已寫入", path)
     return out

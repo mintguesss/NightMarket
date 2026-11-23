@@ -35,9 +35,9 @@ def _rsi(c, n=14):
 
 def features(bars):
     """回傳每一天的因子 dict 陣列（資料不足的天數為 None）。"""
-    c = [b["c"] for b in bars]; h = [b["h"] for b in bars]; v = [b.get("v") or 0 for b in bars]
+    c = [b["c"] for b in bars]; h = [b["h"] for b in bars]; lo = [b["l"] for b in bars]; v = [b.get("v") or 0 for b in bars]
     n = len(c)
-    ma20, ma60, ma120, ma200 = _sma(c, 20), _sma(c, 60), _sma(c, 120), _sma(c, 200)
+    ma20, ma50, ma60, ma120, ma150, ma200 = _sma(c, 20), _sma(c, 50), _sma(c, 60), _sma(c, 120), _sma(c, 150), _sma(c, 200)
     v5, v60 = _sma(v, 5), _sma(v, 60)
     rsi = _rsi(c)
     rets = [0.0] + [(c[i] / c[i - 1] - 1) if c[i - 1] else 0 for i in range(1, n)]
@@ -49,11 +49,12 @@ def features(bars):
         win = rets[i - 59:i + 1]
         m = sum(win) / 60
         vol = math.sqrt(sum((x - m) ** 2 for x in win) / 60) * math.sqrt(252)
-        hi250 = max(h[i - 249:i + 1])
+        hi250 = max(h[i - 249:i + 1]); lo250 = min(lo[i - 249:i + 1])
         out[i] = {
             "c": c[i], "r5": r(5), "r20": r(20), "r60": r(60), "r120": r(120), "r250": r(250),
             "mom121": (c[i - 20] / c[i - 250] - 1) if c[i - 250] else 0,
-            "ma20": ma20[i], "ma60": ma60[i], "ma120": ma120[i], "ma200": ma200[i],
+            "ma20": ma20[i], "ma50": ma50[i], "ma60": ma60[i], "ma120": ma120[i], "ma150": ma150[i], "ma200": ma200[i],
+            "ma200_ago": ma200[i - 21], "lo": c[i] / lo250 if lo250 else 0,
             "vr": (v5[i] / v60[i]) if v60[i] else 1, "vol": vol or 1e-9, "rsi": rsi[i],
             "hi": c[i] / hi250 if hi250 else 0, "liq": (v60[i] or 0) * c[i],
         }
@@ -66,6 +67,12 @@ def _up(f):
     return f["c"] > f["ma60"] > f["ma120"]
 
 
+def _stage2(f):
+    """Minervini 趨勢模板：股價 > 50 > 150 > 200 日線、200 日線一個月來上升、比一年低點高 30% 以上、距一年高點 25% 以內。"""
+    return (f["c"] > f["ma50"] > f["ma150"] > f["ma200"] and f["ma200_ago"] and f["ma200"] > f["ma200_ago"]
+            and f["lo"] >= 1.3 and f["hi"] >= 0.75)
+
+
 STRATS = {
     "mom6": {"name": "半年動能", "desc": "過去 120 天漲最多", "filt": lambda f: True, "score": lambda f: f["r120"]},
     "mom12": {"name": "12-1 動能", "desc": "過去一年（扣掉最近一個月）漲最多", "filt": lambda f: True, "score": lambda f: f["mom121"]},
@@ -76,6 +83,8 @@ STRATS = {
     "reversal": {"name": "短線反轉", "desc": "近 5 天跌最多（均值回歸）", "filt": lambda f: True, "score": lambda f: -f["r5"]},
     "vol_surge": {"name": "量增轉強", "desc": "5 日均量 > 60 日均量 1.5 倍且上漲，挑近 20 天最強", "filt": lambda f: f["vr"] > 1.5 and f["r5"] > 0, "score": lambda f: f["r20"]},
     "near_high": {"name": "貼近新高", "desc": "離一年高點最近、且在多頭排列", "filt": _up, "score": lambda f: f["hi"]},
+    "stage2": {"name": "第二階段趨勢模板", "desc": "Minervini 趨勢模板（均線多頭排列、200 日線上升、離低點遠、近高點），挑相對強度最高",
+               "filt": _stage2, "score": lambda f: 0.4 * f["r60"] + 0.3 * f["r120"] + 0.3 * f["r250"]},
     "composite": {"name": "綜合評分", "desc": "半年動能 + 月動能 + 多頭排列 − 波動度（各自排名後加總）", "filt": lambda f: f["c"] > f["ma200"], "score": None},
 }
 
@@ -102,6 +111,107 @@ def pick(feats_today, strat_key, top, min_liq=0):
         sc = [st["score"](f) for _, f in cand]
     ranked = sorted(zip([c for c, _ in cand], sc), key=lambda x: -x[1])
     return ranked[:top] if top else ranked
+
+
+# ---------------- 大盤濾網 ----------------
+REGIMES = {
+    "none": "不看大盤",
+    "ma200": "大盤跌破 200 日線就空手",
+    "breadth": "股票池站上 50、200 日線的比例平均低於 40% 就空手",
+    "ftd": "大盤跌破 200 日線就空手，但出現追蹤日（底部確認）就提早進場",
+}
+FTD_GAIN = 0.0125  # 追蹤日：反彈第 4～10 天、漲 1.25% 以上且量比前一天大
+
+
+def regime_mode(v):
+    if v is True:
+        return "ma200"
+    if not v:
+        return "none"
+    return v if v in REGIMES else "ma200"
+
+
+def market_state(bench):
+    """逐日的大盤狀態。回傳 list，每天 {below, ftd_off, label, day1, ftd}。
+    追蹤日（O'Neil Follow-Through Day）：跌破 200 日線後進入修正；修正中第一個收漲的日子是反彈第 1 天，
+    第 4～10 天出現大漲（≥1.25%）且量增就是追蹤日，確認底部、可以提早進場；之後跌破修正低點代表反彈失敗，重新空手。"""
+    c = [b["c"] for b in bench]; l = [b["l"] for b in bench]; v = [b.get("v") or 0 for b in bench]
+    ma = _sma(c, 200)
+    out, corr, low, day1, ftd = [], False, None, None, None
+    for i in range(len(c)):
+        if ma[i] is None or i == 0:
+            out.append({"below": False, "ftd_off": False, "label": "資料不足"}); continue
+        below = c[i] < ma[i]
+        if not below:
+            corr, low, day1, ftd = False, None, None, None
+            label = "多頭：大盤在 200 日線之上"
+        else:
+            if not corr:
+                corr, low, day1, ftd = True, l[i], None, None
+            if l[i] < low:  # 破修正低點：反彈嘗試或追蹤日都失效
+                low, day1 = l[i], None
+                if ftd is not None:
+                    ftd = None
+            if ftd is None:
+                if day1 is None and c[i] > c[i - 1]:
+                    day1 = i
+                elif day1 is not None and 3 <= i - day1 <= 9 and c[i - 1] and c[i] / c[i - 1] - 1 >= FTD_GAIN and v[i] > v[i - 1] > 0:
+                    ftd = i
+                elif day1 is not None and i - day1 > 9:
+                    day1 = None if c[i] <= c[i - 1] else i  # 超過第 10 天還沒追蹤日：重新計算反彈
+            if ftd is not None:
+                label = f"修正中，但已出現追蹤日（第 {ftd - day1 + 1} 天），底部確認"
+            elif day1 is not None:
+                label = f"修正中：反彈嘗試第 {i - day1 + 1} 天，等待追蹤日（第 4～10 天大漲 1.25% 以上且量增）"
+            else:
+                label = "修正中：大盤在 200 日線之下，還沒有反彈嘗試"
+        out.append({"below": below, "ftd_off": below and ftd is None, "label": label, "day1": day1, "ftd": ftd})
+    return out
+
+
+def breadth_map(data, feats):
+    """每天股票池站上 50 日線、200 日線的比例：{day: (p50, p200)}。"""
+    cnt = {}
+    for code, bars in data.items():
+        fs = feats[code]
+        for b, f in zip(bars, fs):
+            if not f or not f.get("ma50") or not f.get("ma200"):
+                continue
+            d = b["t"] // 86400
+            x = cnt.setdefault(d, [0, 0, 0])
+            x[0] += f["c"] > f["ma50"]; x[1] += f["c"] > f["ma200"]; x[2] += 1
+    return {d: (a / n, b / n) for d, (a, b, n) in cnt.items() if n >= 10}
+
+
+def breadth_off(p):
+    return p is not None and (p[0] + p[1]) / 2 < 0.4
+
+
+def risk_off(mode, st, br):
+    """st: market_state 當天、br: 廣度 (p50, p200)。"""
+    if mode == "ma200":
+        return bool(st and st["below"])
+    if mode == "ftd":
+        return bool(st and st["ftd_off"])
+    if mode == "breadth":
+        return breadth_off(br)
+    return False
+
+
+_ctx_cache = {}
+
+
+def _ctx(data, feats, bench):
+    """同一份資料重複回測時共用的索引與大盤狀態（研究會跑幾萬次回測）。"""
+    key = (id(data), id(feats), id(bench))
+    if key not in _ctx_cache:
+        _ctx_cache.clear()
+        _ctx_cache[key] = {
+            "idx": {c: {b["t"] // 86400: i for i, b in enumerate(bars)} for c, bars in data.items()},
+            "bidx": {b["t"] // 86400: i for i, b in enumerate(bench)},
+            "ms": market_state(bench), "br": breadth_map(data, feats),
+        }
+    return _ctx_cache[key]
 
 
 def reasons(f):
@@ -132,9 +242,10 @@ def portfolio_backtest(data, feats, bench, cfg, start_t, end_t=None, capital=1_0
     days = sorted({b["t"] // 86400 for bars in data.values() for b in bars if b["t"] >= start_t and (end_t is None or b["t"] <= end_t)})
     if len(days) < 10:
         return None
-    idx = {c: {b["t"] // 86400: i for i, b in enumerate(bars)} for c, bars in data.items()}
-    bidx = {b["t"] // 86400: i for i, b in enumerate(bench)}
-    bc = [b["c"] for b in bench]; bma = _sma(bc, 200)
+    ctx = _ctx(data, feats, bench)
+    idx, bidx, ms, br = ctx["idx"], ctx["bidx"], ctx["ms"], ctx["br"]
+    mode = regime_mode(cfg.get("regime"))
+    slip = cfg.get("slip", 0.001)  # 每邊滑價（預設 0.1%；壓力測試會加大）
     cash, pos = float(capital), {}  # pos: code -> {qty, entry}
     pending, eq, trades, n_trades = None, [], [], 0
     stop = (cfg.get("stop") or 0) / 100
@@ -150,7 +261,7 @@ def portfolio_backtest(data, feats, bench, cfg, start_t, end_t=None, capital=1_0
                     if i is None:
                         continue
                     px = data[code][i]["o"]; p = pos.pop(code)
-                    fee = tw_cost(code)[1] if tw else 0
+                    fee = (tw_cost(code)[1] if tw else 0) + slip
                     cash += p["qty"] * px * (1 - fee); n_trades += 1
                     trades.append((p["qty"] * px * (1 - fee)) / p["cost"] - 1)
             new = [c for c in target if c not in pos and idx[c].get(d) is not None]
@@ -159,7 +270,7 @@ def portfolio_backtest(data, feats, bench, cfg, start_t, end_t=None, capital=1_0
                 slot = val / top
                 for code in new:
                     px = data[code][idx[code][d]]["o"]
-                    fee = tw_cost(code)[0] if tw else 0
+                    fee = (tw_cost(code)[0] if tw else 0) + slip
                     amt = min(slot, cash)
                     qty = amt / (px * (1 + fee))  # 研究用：允許零股，避免高價股買不到
                     if qty * px < 1:
@@ -175,7 +286,7 @@ def portfolio_backtest(data, feats, bench, cfg, start_t, end_t=None, capital=1_0
                     continue
                 b = data[code][i]; p = pos[code]
                 if b["l"] <= p["entry"] * (1 - stop):
-                    px = min(b["o"], p["entry"] * (1 - stop)); fee = tw_cost(code)[1] if tw else 0
+                    px = min(b["o"], p["entry"] * (1 - stop)); fee = (tw_cost(code)[1] if tw else 0) + slip
                     cash += p["qty"] * px * (1 - fee); pos.pop(code); n_trades += 1
                     trades.append((p["qty"] * px * (1 - fee)) / p["cost"] - 1)
         # 3) 收盤市值
@@ -190,8 +301,7 @@ def portfolio_backtest(data, feats, bench, cfg, start_t, end_t=None, capital=1_0
         # 4) 再平衡日：收盤打分數，隔天執行
         if k % rebal == 0 and k < len(days) - 1:
             bi = bidx.get(d)
-            risk_off = cfg.get("regime") and bi is not None and bma[bi] and bc[bi] < bma[bi]
-            if risk_off:
+            if mode != "none" and risk_off(mode, ms[bi] if bi is not None else None, br.get(d)):
                 pending = []
             else:
                 today = {c: feats[c][idx[c][d]] for c in data if idx[c].get(d) is not None}

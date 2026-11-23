@@ -616,6 +616,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 /* AI 選股 */
 .ai-row { display: flex; align-items: center; gap: 10px; padding: 4px 16px 8px; flex-wrap: wrap; }
 .ai-row select { max-width: 100%; }
+.ai-market { margin: 4px 16px 8px; font-size: 13px; line-height: 1.7; }
+.ai-checks { margin-top: 6px; line-height: 1.8; }
 .ai-warn { margin: 4px 16px 8px; padding: 8px 12px; border-radius: 8px; background: rgba(245,165,36,.12); border: 1px solid rgba(245,165,36,.4); font-size: 13px; }
 .ai-verdict { margin: 4px 16px 10px; padding: 10px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--line); font-size: 13px; line-height: 1.6; }
 .tbl tr.ai-in td:first-child { box-shadow: inset 3px 0 0 var(--accent, #3d8bfd); }

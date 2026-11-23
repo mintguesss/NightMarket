@@ -481,9 +481,12 @@ $('#mtGrid').addEventListener('click', (e) => { const b = e.target.closest('[dat
 /* ---------- AI 選股 ---------- */
 const aiState = { picks: null, research: null, loading: false };
 const pctS = (v, d = 1) => (v == null || isNaN(v) ? '--' : `${v > 0 ? '+' : ''}${(+v).toFixed(d)}%`);
-const cfgText = (c) => c ? `持股 ${c.top} 檔・每 ${c.rebal} 個交易日調倉・${c.stop ? `停損 ${c.stop}%` : '不設停損'}・${c.regime ? '大盤跌破 200 日線就空手' : '不看大盤'}` : '';
-const STRAT_NAME = { mom6: '半年動能', mom12: '12-1 動能', trend_mom: '多頭排列＋季動能', breakout: '一年新高突破', lowvol_mom: '低波動動能', pullback: '多頭拉回', reversal: '短線反轉', vol_surge: '量增轉強', near_high: '貼近新高', composite: '綜合評分' };
-const idText = (id) => { const [s, t, r, sl, g] = id.split('|'); return `${STRAT_NAME[s] || s}・${t.replace('top', '')} 檔・${r.replace('r', '每 ')} 日・${sl === 'sl0' ? '無停損' : '停損 ' + sl.slice(2) + '%'}・${g === 'regime' ? '看大盤' : '不看大盤'}`; };
+const REG = { none: '不看大盤', ma200: '大盤跌破 200 日線就空手', breadth: '市場廣度不足就空手', ftd: '跌破 200 日線空手、出現追蹤日提早進場' };
+const REG_S = { none: '不看大盤', ma200: '200 日線濾網', breadth: '廣度濾網', ftd: '追蹤日濾網', regime: '200 日線濾網', all: '不看大盤' };
+const regOf = (g) => (g === true ? 'ma200' : !g ? 'none' : g);
+const cfgText = (c) => c ? `持股 ${c.top} 檔・每 ${c.rebal} 個交易日調倉・${c.stop ? `停損 ${c.stop}%` : '不設停損'}・${REG[regOf(c.regime)] || ''}` : '';
+const STRAT_NAME = { mom6: '半年動能', mom12: '12-1 動能', trend_mom: '多頭排列＋季動能', breakout: '一年新高突破', lowvol_mom: '低波動動能', pullback: '多頭拉回', reversal: '短線反轉', vol_surge: '量增轉強', near_high: '貼近新高', composite: '綜合評分', stage2: '第二階段趨勢模板' };
+const idText = (id) => { const [s, t, r, sl, g] = id.split('|'); return `${STRAT_NAME[s] || s}・${t.replace('top', '')} 檔・${r.replace('r', '每 ')} 日・${sl === 'sl0' ? '無停損' : '停損 ' + sl.slice(2) + '%'}・${REG_S[g] || g}`; };
 PAGES.ai = {
   async load(refresh = false) {
     if (aiState.loading) return; aiState.loading = true;
@@ -504,7 +507,7 @@ PAGES.ai = {
     const held = new Set(Object.keys(state.paperAI?.positions || {}));
     const day = new Date(p.asof * 1000).toLocaleDateString('zh-TW');
     const opts = [`<option value="auto" ${p.auto ? 'selected' : ''}>自動：用研究第一名${res ? '（' + idText(res.best_id) + '）' : ''}</option>`]
-      .concat((res?.top || []).map((t) => `<option value="${esc(t.id)}" ${!p.auto && t.id === [p.cfg.strat, 'top' + p.cfg.top, 'r' + p.cfg.rebal, 'sl' + p.cfg.stop, p.cfg.regime ? 'regime' : 'all'].join('|') ? 'selected' : ''}>${esc(idText(t.id))}</option>`)).join('');
+      .concat((res?.top || []).map((t) => `<option value="${esc(t.id)}" ${!p.auto && t.id === [p.cfg.strat, 'top' + p.cfg.top, 'r' + p.cfg.rebal, 'sl' + p.cfg.stop, regOf(p.cfg.regime)].join('|') ? 'selected' : ''}>${esc(idText(t.id))}</option>`)).join('');
     const wf = res?.walk_forward, base = res?.base || {};
     const W = ['1m', '3m', '6m', '12m', '3y'], WN = { '1m': '近 1 月', '3m': '近 3 月', '6m': '近 6 月', '12m': '近 12 月', '3y': '近 3 年' };
     const meth = res?.method || { wins: ['6m', '12m'], rebal: 'quarterly' }, per = meth.rebal === 'monthly' ? '月' : '季';
@@ -526,12 +529,27 @@ PAGES.ai = {
           <div class="s">${p.last_rebal ? `上次調倉 ${esc(p.last_rebal)}・已過 ${p.days} 個交易日` : '開盤後第一次建倉'}　<a href="#" id="aiGoPaper">查看帳戶 ›</a></div></div>
       </div>
       <div class="ai-row"><label class="muted small">使用策略</label><select class="tsel" id="aiCfg">${opts}</select></div>
-      ${p.risk_off ? `<div class="ai-warn">大盤（${state.mkt === 'tw' ? '0050' : 'SPY'} ${fmtP(p.bench_px)}）在 200 日均線 ${fmtP(p.bench_ma200)} 之下，策略設定為空手，下次調倉會全部出場。</div>` : ''}
+      <div class="ai-market"><b>大盤狀態</b>　${esc(p.market?.label || '')}　<span class="muted">（${state.mkt === 'tw' ? '0050' : 'SPY'} ${fmtP(p.bench_px)}・200 日線 ${fmtP(p.bench_ma200)}）</span>
+        ${p.market?.breadth ? `<br><b>市場廣度</b>　股票池站上 50 日線 <b class="${p.market.breadth[0] >= 0.5 ? 'up' : 'down'}">${(p.market.breadth[0] * 100).toFixed(0)}%</b>、站上 200 日線 <b class="${p.market.breadth[1] >= 0.5 ? 'up' : 'down'}">${(p.market.breadth[1] * 100).toFixed(0)}%</b>` : ''}</div>
+      ${p.risk_off ? `<div class="ai-warn">目前的大盤濾網（${esc(p.regime_text)}）判定空手，下次調倉會全部出場；名單仍照常列出供參考。</div>` : ''}
       <div class="sec-title"><b>今日建議</b><span>以 ${day} 收盤資料評分，前 ${p.cfg.top} 名為買進名單；排名掉出前 ${p.cfg.top * 2} 名才賣，減少換手</span></div>
       <table class="tbl"><thead><tr><th>名次</th><th class="l">名稱</th><th>收盤</th><th>現價</th><th>近一月</th><th>半年</th><th class="l">入選理由</th></tr></thead><tbody>
         ${p.rows.map((r) => { const q = state.quotes[r.code]; return `<tr data-code="${esc(r.code)}" class="${r.rank <= p.cfg.top ? 'ai-in' : 'muted'}"><td class="num">${r.rank}${held.has(r.code) ? ' <span class="tag buy">持有</span>' : ''}</td><td class="l">${nmCell(r.code, r.name)}</td>
           <td class="num">${fmtP(r.price)}</td><td class="num ${q ? cls(chgOf(q).d) : ''}">${q ? fmtP(q.price) : '--'}</td><td class="num ${cls(r.r20)}">${pctS(r.r20)}</td><td class="num ${cls(r.r120)}">${pctS(r.r120)}</td><td class="l small">${esc(r.reason)}</td></tr>`; }).join('')}</tbody></table>
-      <div class="sec-title"><b>驗證結果</b><span>${res ? `研究於 ${new Date(res.updated * 1000).toLocaleString('zh-TW')}・${res.universe} 檔・160 組設定` : '還沒有研究結果'}${st.running ? '・<b class="up">重新研究中…</b>' : st.msg ? '・' + esc(st.msg) : ''}</span></div>
+      <div class="sec-title"><b>驗證結果</b><span>${res ? `研究於 ${new Date(res.updated * 1000).toLocaleString('zh-TW')}・${res.universe} 檔・${res.n_cfgs || 352} 組設定` : '還沒有研究結果'}${st.running ? '・<b class="up">重新研究中…</b>' : st.msg ? '・' + esc(st.msg) : ''}</span></div>
+      ${res?.robust ? (() => { const r = res.robust, ok = (b) => b ? '<b class="up">✓</b>' : '<b class="down">✗</b>';
+        return `<div class="ai-verdict"><b>${res.robust_ok ? '<span class="up">通過壓力測試</span>' : '<span class="down">沒有策略通過全部壓力測試，採用通過最多項的</span>'}</b>（找「最不容易壞」的策略，而不是紙上賺最多的）
+          <div class="ai-checks">${ok(r.pass.cost)} 成本加重（每邊滑價 0.3%）後，近 3 年仍贏等權重全買 ${pctS(r.stress_excess)}
+          <br>${ok(r.pass.years)} 逐年有一半以上贏等權重全買：${r.years_beat} / ${r.years} 年（${Object.entries(r.yearly || {}).map(([y, [a, b]]) => `${y} ${pctS(a, 0)} vs ${pctS(b, 0)}`).join('、')}）
+          <br>${ok(r.pass.neighbors)} 參數小改（持股數、調倉頻率、停損）成績差不多，不是剛好的尖峰
+          <br>${ok(r.pass.trades)} 近 3 年 ${r.trades} 筆出場交易（至少 30 筆才有統計意義）</div></div>`; })() : ''}
+      ${p.track?.rows?.length ? (() => { const T = p.track, sm = (x) => x ? `平均 <b class="${cls(x.ret - x.bench)}">${pctS(x.ret)}</b>，大盤 ${pctS(x.bench)}；${x.n} 天中 ${x.beat.toFixed(0)}% 贏大盤` : '還沒有足夠天數';
+        const cell = (x) => x ? `<td class="num ${cls(x.ret - x.bench)}">${pctS(x.ret)}</td><td class="num">${pctS(x.bench)}</td>` : '<td class="num muted">--</td><td class="num muted">--</td>';
+        return `<div class="sec-title"><b>建議事後追蹤</b><span>每天的買進名單（等權重）之後 5、20 個交易日的實際漲跌</span></div>
+        <div class="ai-verdict">5 個交易日後：${sm(T.sum5)}<br>20 個交易日後：${sm(T.sum20)}
+          <div class="muted small" style="margin-top:4px">實盤紀錄 ${T.live_n} 天（從開始使用後每天累積）${T.live5 ? `：5 日後平均 ${pctS(T.live5.ret)} vs 大盤 ${pctS(T.live5.bench)}` : ''}；其餘為「回填」：用每一天當時的資料選股（不偷看未來），但策略設定是現在的。名單在大盤濾網空手時仍會列出。</div></div>
+        <table class="tbl"><thead><tr><th class="l">日期</th><th class="l">來源</th><th class="l">大盤濾網</th><th>5 日後</th><th>大盤</th><th>20 日後</th><th>大盤</th></tr></thead><tbody>
+          ${T.rows.slice(0, 30).map((r) => `<tr><td class="l num">${esc(r.date)}</td><td class="l">${r.live ? '<span class="tag buy">實盤</span>' : '<span class="muted">回填</span>'}</td><td class="l small">${r.risk_off ? '<span class="down">空手</span>' : '持股'}</td>${cell(r.d5)}${cell(r.d20)}</tr>`).join('')}</tbody></table>`; })() : ''}
       ${res ? `<div class="ai-verdict">${verdict}<div class="muted small" style="margin-top:6px">選策略的方式：依${winsT(meth.wins)}的夏普值排名，每${per}重選一次${meta ? `（交叉測試 ${Object.keys(meta.methods).length} 種選法後，這個市場樣本外最好的做法）` : ''}；多數時段輸給等權重全買、或回撤超過 35% 的會被扣分。股票池用的是目前的大型股，回測報酬會偏高（倖存者偏差），所以重點看「有沒有贏等權重全買」。</div></div>
         <table class="tbl"><thead><tr><th class="l">策略（各自最佳參數）</th>${W.map((w) => `<th>${WN[w]}</th>`).join('')}<th>近 12 月夏普</th><th>3 年最大回撤</th></tr></thead><tbody>
           ${res.by_strat.map((b) => `<tr class="${b.strat === p.cfg.strat ? 'ai-in' : ''}"><td class="l"><b>${esc(b.name)}</b> <span class="muted small">${esc(b.desc)}</span></td>${W.map((w) => { const x = b.win[w] || {}; return `<td class="num ${cls(x.excess || 0)}" title="比等權重全買 ${pctS(x.excess)}">${pctS(x.ret)}</td>`; }).join('')}
@@ -559,7 +577,7 @@ $('#aiBody').addEventListener('change', async (e) => {
   if (e.target.id === 'aiOn') { const r = await post('/api/ai/config', { mkt: state.mkt, enabled: e.target.checked }); toast(r.enabled ? 'AI 模擬倉已啟用' : 'AI 模擬倉已暫停'); PAGES.ai.load(); }
   if (e.target.id === 'aiCfg') {
     const v = e.target.value; let cfg = 'auto';
-    if (v !== 'auto') { const [s, t, rb, sl, g] = v.split('|'); cfg = { strat: s, top: +t.slice(3), rebal: +rb.slice(1), stop: +sl.slice(2), regime: g === 'regime' }; }
+    if (v !== 'auto') { const [s, t, rb, sl, g] = v.split('|'); cfg = { strat: s, top: +t.slice(3), rebal: +rb.slice(1), stop: +sl.slice(2), regime: g === 'regime' ? 'ma200' : g === 'all' ? 'none' : g }; }
     await post('/api/ai/config', { mkt: state.mkt, cfg }); toast('策略已更新，下次調倉生效'); PAGES.ai.load(true);
   }
 });

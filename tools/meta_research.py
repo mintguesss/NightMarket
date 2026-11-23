@@ -49,9 +49,17 @@ def run(mkt):
                 cache[(e, w)][R.cfg_id(cfg)] = {"cfg": cfg, "s": s}
         print(f"  [{mkt}] {time.strftime('%Y-%m-%d', time.gmtime(bench[e]['t']))} 完成（{time.time() - t0:.0f} 秒）", flush=True)
 
+    memo = {}
+
     def pick(e, wins):
+        if (e, tuple(wins)) in memo:
+            return memo[(e, tuple(wins))]
+        memo[(e, tuple(wins))] = _pick(e, wins)
+        return memo[(e, tuple(wins))]
+
+    def _pick(e, wins):
         res = {i: {"cfg": cache[(e, wins[0])][i]["cfg"], "win": {w: cache[(e, w)][i]["s"] for w in wins}} for i in cache[(e, wins[0])]}
-        return R.score(res, [(w, LEN[w], 1 / len(wins)) for w in wins])[0][0], res
+        return R.robust_choose(mkt, data, feats, bench, e, res, [(w, LEN[w], 1 / len(wins)) for w in wins])[0], res
 
     # 2) 每種方式 × 重選頻率，串接樣本外報酬
     out = {}

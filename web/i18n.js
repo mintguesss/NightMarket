@@ -163,7 +163,7 @@ Object.assign(I18N_EN, {
   '入選理由': 'Why it was picked', '持有': 'Held', '策略（各自最佳參數）': 'Strategy (best parameters)', '近 3 月': '3M', '近 6 月': '6M', '近 12 月': '12M', '近 3 年': '3Y',
   '近 12 月夏普': '12M Sharpe', '3 年最大回撤': '3Y max drawdown', '等權重全買股票池': 'Equal-weight universe', '選策略的日期': 'Selection date', '當時選中': 'Picked then',
   '下一季': 'Next quarter', '等權重': 'Equal-weight', '台股市值前': 'Top Taiwan stocks by market cap:', '美股市值前': 'Top US stocks by market cap:', ' 檔': '',
-  '我的': 'Mine', '前半段 vs 等權重': '1st half vs EW', '後半段 vs 等權重': '2nd half vs EW', '選法穩定': 'Stable method', '選法不穩定': 'Unstable method', '近 1 月': '1M', '選策略方式比較': 'Selection methods compared', '看哪些期間': 'Lookback', '多久重選': 'Re-select', '累積報酬': 'Cumulative', '最大回撤': 'Max drawdown', '贏等權重的次數': 'Periods beating equal-weight', '每月': 'Monthly', '每季': 'Quarterly', '採用': 'In use', '交易所時間': 'exchange time', '夜盤交易中': 'Overnight', '還沒有動作。開盤時 AI 會自動建倉，之後依調倉週期換股。': 'No activity yet. The AI buys at the next open and rotates on its rebalance schedule.',
+  '我的': 'Mine', 'Minervini 趨勢模板（均線多頭排列、200 日線上升、離低點遠、近高點），挑相對強度最高': 'Minervini trend template (stacked MAs, rising 200-day, far above the low, near the high), highest relative strength', '大盤跌破 200 日線就空手': 'Cash below the 200-day MA', '市場廣度不足就空手': 'Cash when breadth is weak', '跌破 200 日線空手、出現追蹤日提早進場': 'Cash below the 200-day MA, re-enter early on a follow-through day', '股票池站上 50、200 日線的比例平均低於 40% 就空手': 'Cash when under 40% of the universe is above its 50/200-day MAs', '大盤跌破 200 日線就空手，但出現追蹤日（底部確認）就提早進場': 'Cash below the 200-day MA, but re-enter early on a follow-through day', '大盤狀態': 'Market', '市場廣度': 'Breadth', '建議事後追蹤': 'Pick follow-up', '實盤': 'Live', '回填': 'Backfill', '空手': 'Cash', '持股': 'Invested', '來源': 'Source', '大盤濾網': 'Market filter', '5 日後': '+5d', '20 日後': '+20d', '通過壓力測試': 'Passed stress tests', '第二階段趨勢模板': 'Stage 2 trend template', '追蹤日濾網': 'FTD filter', '廣度濾網': 'Breadth filter', '200 日線濾網': '200-day MA filter', '前半段 vs 等權重': '1st half vs EW', '後半段 vs 等權重': '2nd half vs EW', '選法穩定': 'Stable method', '選法不穩定': 'Unstable method', '近 1 月': '1M', '選策略方式比較': 'Selection methods compared', '看哪些期間': 'Lookback', '多久重選': 'Re-select', '累積報酬': 'Cumulative', '最大回撤': 'Max drawdown', '贏等權重的次數': 'Periods beating equal-weight', '每月': 'Monthly', '每季': 'Quarterly', '採用': 'In use', '交易所時間': 'exchange time', '夜盤交易中': 'Overnight', '還沒有動作。開盤時 AI 會自動建倉，之後依調倉週期換股。': 'No activity yet. The AI buys at the next open and rotates on its rebalance schedule.',
   'AI 還沒有持股：開盤時會依「AI 選股」頁的策略自動買進。': 'No AI holdings yet — it buys at the next open using the strategy on the AI Picks page.',
   '策略與每日建議在「AI 選股」頁': 'Strategy and daily picks are on the AI Picks page', 'AI 自動管理，點一列切到該股票': 'Managed by the AI · click a row to open the chart',
   // 策略名稱與說明
@@ -183,7 +183,7 @@ Object.assign(I18N_EN, {
 I18N_RULES.push(
   [/^大盤（(\S+) ([\d.,]+)）在 200 日均線 ([\d.,]+) 之下，策略設定為空手，下次調倉會全部出場。$/, 'The market ($1 $2) is below its 200-day MA ($3), so the strategy goes to cash at the next rebalance.'],
   [/^以 (\S+) 收盤資料評分，前 (\d+) 名為買進名單；排名掉出前 (\d+) 名才賣，減少換手$/, 'Scored on the $1 close · top $2 are bought · a holding is sold only after it drops out of the top $3'],
-  [/^研究於 (.+?)・(\d+) 檔・160 組設定(.*)$/, 'Research run $1 · $2 stocks · 160 configurations'],
+  [/^研究於 (.+?)・(\d+) 檔・(\d+) 組設定(.*)$/, 'Research run $1 · $2 stocks · $3 configurations'],
   [/^：只用當時以前的資料選策略、再看下一季的真實表現，串接 (\d+) 季累積$/, ': choosing the strategy with only the data available at the time, then holding it for the next quarter, compounded over $1 quarters: '],
   [/^，贏過等權重全買 (\S+) 和大盤 (\S+)。$/, ', beating equal-weight $1 and the index $2.'],
   [/^：串接 (\d+) 季累積 (\S+)，等權重全買 (\S+)、大盤 (\S+)。這個市場的選股優勢不明顯，建議只當參考。$/, ': compounded over $1 quarters $2 vs. equal-weight $3 and index $4. No clear edge in this market — treat the picks as reference only.'],
@@ -196,6 +196,25 @@ Object.assign(I18N_EN, {
     'How the strategy is chosen: ranked by Sharpe ratio over the last 6 and 12 months (this beat versions that also weigh 3 months or 3 years in the walk-forward test); configurations that lose to equal-weight in most windows or draw down more than 35% are penalized. The universe is today\'s large caps, so backtest returns are inflated by survivorship bias — what matters is whether it beats the equal-weight universe.',
   '每一季只用當時以前的資料選出第一名，持有下一季': 'Each quarter, pick the winner using only past data, then hold it for the next quarter',
   '數字顏色：贏等權重全買為紅（漲色），輸為綠（跌色）。滑鼠移到數字上可看超額報酬。': 'Colors: beats equal-weight in the up color, loses in the down color. Hover a number for the excess return.',
+});
+I18N_RULES.push(
+  [/^修正中：反彈嘗試第 (\d+) 天，等待追蹤日（第 4～10 天大漲 1.25% 以上且量增）$/, 'Correction: rally attempt day $1, waiting for a follow-through day (day 4–10, up 1.25%+ on higher volume)'],
+  [/^修正中，但已出現追蹤日（第 (\d+) 天），底部確認$/, 'Correction, but a follow-through day appeared (day $1) — bottom confirmed'],
+  [/^目前的大盤濾網（(.+)）判定空手，下次調倉會全部出場；名單仍照常列出供參考。$/, (m, a) => `The market filter (${I18N_EN[a] || a}) says cash: everything is sold at the next rebalance. Picks are still listed for reference.`],
+  [/^成本加重（每邊滑價 0.3%）後，近 3 年仍贏等權重全買 (\S+)$/, 'With costs raised (0.3% slippage per side) it still beats equal-weight over 3 years by $1'],
+  [/^逐年有一半以上贏等權重全買：(\d+) \/ (\d+) 年（(.+)）$/, 'Beats equal-weight in at least half the years: $1 / $2 ($3)'],
+  [/^近 3 年 (\d+) 筆出場交易（至少 30 筆才有統計意義）$/, '$1 closed trades in 3 years (30+ needed to be meaningful)'],
+  [/^(\d+) 個交易日後：平均$/, '+$1 trading days: average'],
+  [/^，大盤 (\S+)；(\d+) 天中 (\S+) 贏大盤$/, ', index $1; beat the index on $3 of $2 days'],
+  [/^實盤紀錄 (\d+) 天（從開始使用後每天累積）.*$/, 'Live record: $1 days (accumulates daily). The rest is backfill: picks made with the data available each day (no look-ahead) but with today\'s strategy settings. Picks are listed even when the market filter is in cash.'],
+);
+Object.assign(I18N_EN, {
+  '修正中：大盤在 200 日線之下，還沒有反彈嘗試': 'Correction: below the 200-day MA, no rally attempt yet', '多頭：大盤在 200 日線之上': 'Uptrend: above the 200-day MA',
+  '股票池站上 50 日線': 'Universe above the 50-day MA', '、站上 200 日線': ', above the 200-day MA',
+  '（找「最不容易壞」的策略，而不是紙上賺最多的）': '(the strategy least likely to break, not the best on paper)',
+  '參數小改（持股數、調倉頻率、停損）成績差不多，不是剛好的尖峰': 'Small parameter changes (holdings, rebalance, stop) perform similarly — a plateau, not a lucky spike',
+  '沒有策略通過全部壓力測試，採用通過最多項的': 'No strategy passed every stress test; using the one that passed the most',
+  '每天的買進名單（等權重）之後 5、20 個交易日的實際漲跌': 'How each day\'s buy list (equal-weight) actually did 5 and 20 trading days later',
 });
 const I18N_SKIP = '.wname b, .nm b, .side-name, .news-item, .hm-c b, .mt-name, #topQuote b, .ann summary .t, .ev .tt, .sitem .n, .uchip, .st-ev b, .kv td, .summary, .hm-tip b, .wnote, .side-note, .st-item b, .tbl td.l .nm';
 const I18N_KEYS = Object.keys(I18N_EN).filter((k) => k.length >= 2).sort((a, b) => b.length - a.length);

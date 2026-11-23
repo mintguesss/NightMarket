@@ -2140,12 +2140,28 @@ def ai_compute(mkt):
         with ThreadPoolExecutor(6) as ex:
             data = {c: b for c, b in ex.map(one, codes) if b and len(b) > 260}
         bench = _completed(_daily(DEFAULT_BENCH[mkt], 2), mkt)
-        feats = {c: PK.features(b)[-1] for c, b in data.items()}
+        if mkt == "tw" and bench:  # Yahoo 台股個股日K常晚一天：用證交所報價補上大盤已有的那一天
+            bday = bench[-1]["t"] // 86400
+            lag = [c for c, b in data.items() if b[-1]["t"] // 86400 < bday]
+            if lag:
+                ds = time.strftime("%Y%m%d", time.gmtime(bench[-1]["t"] + 8 * 3600))
+                qs = _safe(quotes, lag, {}) or {}
+                for c in lag:
+                    q = qs.get(c) or {}
+                    if q.get("date") == ds and q.get("price") and q.get("open"):
+                        data[c] = data[c] + [{"t": bench[-1]["t"], "o": q["open"], "h": q.get("high") or q["price"], "l": q.get("low") or q["price"],
+                                              "c": q["price"], "v": (q.get("volume") or 0) * 1000}]
+        full = {c: PK.features(b) for c, b in data.items()}
+        feats = {c: fs[-1] for c, fs in full.items()}
         last_t = max((b[-1]["t"] for b in data.values()), default=0)
         feats = {c: f for c, f in feats.items() if f and data[c][-1]["t"] >= last_t - 5 * 86400}  # 停牌太久的不選
         bc = [b["c"] for b in bench]
         ma200 = sum(bc[-200:]) / 200 if len(bc) >= 200 else None
-        return {"feats": feats, "asof": bench[-1]["t"] if bench else last_t, "risk_off": bool(ma200 and bc[-1] < ma200),
+        ms = PK.market_state(bench) if bench else []
+        brm = PK.breadth_map(data, full)
+        br = brm.get(bench[-1]["t"] // 86400) if bench else None
+        return {"feats": feats, "full": full, "data": data, "bench": bench, "asof": bench[-1]["t"] if bench else last_t,
+                "ms": ms[-1] if ms else None, "br": br, "brm": brm, "ms_all": ms,
                 "bench_px": bc[-1] if bc else None, "bench_ma200": ma200, "n": len(data)}
     return cached("ai:" + mkt, 1200, load)
 
@@ -2160,13 +2176,107 @@ def ai_picks_api(mkt, refresh=False):
     cfg = ai_cfg(mkt)
     ranked = PK.pick(d["feats"], cfg["strat"], 0)
     top = cfg["top"]
+    mode = PK.regime_mode(cfg.get("regime"))
+    ro = PK.risk_off(mode, d["ms"], d["br"])
+    ai_signal_record(mkt, d, cfg, ranked, ro)
     rows = [{"code": c, "name": zh_name(c, None), "score": sc, "rank": i + 1, "price": d["feats"][c]["c"], "reason": PK.reasons(d["feats"][c]),
              "r20": d["feats"][c]["r20"] * 100, "r120": d["feats"][c]["r120"] * 100} for i, (c, sc) in enumerate(ranked[:max(20, top * 2)])]
     st = ai_state().get(mkt, {})
     return {"ok": True, "mkt": mkt, "asof": d["asof"], "cfg": cfg, "strat_name": PK.STRATS[cfg["strat"]]["name"], "strat_desc": PK.STRATS[cfg["strat"]]["desc"],
-            "risk_off": d["risk_off"] and cfg.get("regime"), "bench_px": d["bench_px"], "bench_ma200": d["bench_ma200"], "universe": d["n"],
+            "risk_off": ro, "regime_text": PK.REGIMES[mode], "market": {"label": (d["ms"] or {}).get("label"), "below": (d["ms"] or {}).get("below"),
+                                                                       "breadth": d["br"], "ftd_off": (d["ms"] or {}).get("ftd_off")},
+            "track": ai_signal_eval(mkt, d, cfg),
+            "bench_px": d["bench_px"], "bench_ma200": d["bench_ma200"], "universe": d["n"],
             "rows": rows, "enabled": ai_enabled(mkt), "auto": not st.get("cfg"), "last_rebal": st.get("last_rebal"), "days": st.get("days", 0),
             "log": [x for x in paper_load("ai").get("log", []) if x.get("mkt") == mkt][:50]}
+
+
+SIGNAL_FILE = os.path.join(DATA_DIR, "ai_signals.json")  # 每天的建議名單，事後追蹤 5、20 個交易日的實際表現
+
+
+def ai_signal_record(mkt, d, cfg, ranked, ro):
+    day = time.strftime("%Y-%m-%d", time.gmtime(d["asof"] + (8 * 3600 if mkt == "tw" else 0)))
+    with _ai_lock:
+        try:
+            with open(SIGNAL_FILE, encoding="utf-8") as f:
+                allsig = json.load(f)
+        except (OSError, ValueError):
+            allsig = {}
+        m = allsig.setdefault(mkt, {})
+        if day in m:
+            return
+        m[day] = {"t": d["asof"], "strat": cfg["strat"], "cfg": cfg, "risk_off": ro, "bench": d["bench_px"],
+                  "picks": [[c, d["feats"][c]["c"]] for c, _ in ranked[:cfg["top"]]]}
+        for k in sorted(m)[:-250]:
+            del m[k]
+        tmp = SIGNAL_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(allsig, f, ensure_ascii=False)
+        os.replace(tmp, SIGNAL_FILE)
+
+
+def ai_signal_eval(mkt, d, cfg, backfill=40):
+    """建議名單事後的實際表現：買進名單（等權重）5、20 個交易日後的報酬，跟大盤比。
+    實盤紀錄從開始使用後每天累積；另外用當時的資料回填最近 40 個交易日（標示「回填」，用的是目前的策略設定）。"""
+    bench = d["bench"]
+    if not bench:
+        return {}
+    bdays = [b["t"] // 86400 for b in bench]; bpos = {x: i for i, x in enumerate(bdays)}
+    closes = {c: {b["t"] // 86400: b["c"] for b in bars} for c, bars in d["data"].items()}
+
+    def px(code, day):
+        s = closes.get(code)
+        if not s:
+            return None
+        if day in s:
+            return s[day]
+        prev = [x for x in s if x <= day]
+        return s[max(prev)] if prev else None
+
+    def fwd(rec_day, picks, n):
+        i = bpos.get(rec_day)
+        if i is None or i + n >= len(bench):
+            return None
+        tday = bdays[i + n]
+        rs = [(px(c, tday) / p0 - 1) for c, p0 in picks if p0 and px(c, tday)]
+        if not rs:
+            return None
+        b = bench[i + n]["c"] / bench[i]["c"] - 1
+        return {"ret": sum(rs) / len(rs) * 100, "bench": b * 100, "hit": sum(1 for r in rs if r > b) / len(rs) * 100}
+
+    rows = []
+    try:
+        with open(SIGNAL_FILE, encoding="utf-8") as f:
+            live = json.load(f).get(mkt, {})
+    except (OSError, ValueError):
+        live = {}
+    for day, r in sorted(live.items()):
+        rd = r["t"] // 86400
+        rows.append({"date": day, "strat": r["strat"], "risk_off": r.get("risk_off"), "n": len(r["picks"]), "live": True,
+                     "d5": fwd(rd, r["picks"], 5), "d20": fwd(rd, r["picks"], 20)})
+    # 回填：用每一天當時的因子選股（不偷看未來），只是策略設定是現在的
+    live_days = {r["t"] // 86400 for r in live.values()}
+    mode = PK.regime_mode(cfg.get("regime"))
+    idx = {c: {b["t"] // 86400: i for i, b in enumerate(bars)} for c, bars in d["data"].items()}
+    for i in range(max(0, len(bench) - backfill), len(bench)):
+        rd = bdays[i]
+        if rd in live_days:
+            continue
+        today = {c: d["full"][c][idx[c][rd]] for c in d["data"] if rd in idx[c]}
+        ranked = PK.pick(today, cfg["strat"], cfg["top"])
+        picks = [[c, today[c]["c"]] for c, _ in ranked]
+        ro = PK.risk_off(mode, d["ms_all"][i] if i < len(d["ms_all"]) else None, d["brm"].get(rd))
+        rows.append({"date": time.strftime("%Y-%m-%d", time.gmtime(bench[i]["t"] + (8 * 3600 if mkt == "tw" else 0))), "strat": cfg["strat"],
+                     "risk_off": ro, "n": len(picks), "live": False, "d5": fwd(rd, picks, 5), "d20": fwd(rd, picks, 20)})
+    rows.sort(key=lambda x: x["date"], reverse=True)
+
+    def summ(k, only_live=None):
+        xs = [r[k] for r in rows if r[k] and (only_live is None or r["live"] == only_live)]
+        if not xs:
+            return None
+        return {"n": len(xs), "ret": sum(x["ret"] for x in xs) / len(xs), "bench": sum(x["bench"] for x in xs) / len(xs),
+                "beat": sum(1 for x in xs if x["ret"] > x["bench"]) / len(xs) * 100, "hit": sum(x["hit"] for x in xs) / len(xs)}
+    return {"rows": rows[:60], "sum5": summ("d5"), "sum20": summ("d20"), "live5": summ("d5", True), "live20": summ("d20", True), "live_n": len(live)}
 
 
 def _ai_log(acc, mkt, msg):
@@ -2206,8 +2316,10 @@ def ai_run(mkt, force=False):
         if due:
             ranked = PK.pick(d["feats"], cfg["strat"], 0)
             top = cfg["top"]
-            if cfg.get("regime") and d["risk_off"]:
-                target, why_out = [], "大盤跌破 200 日均線，全部出場空手"
+            mode = PK.regime_mode(cfg.get("regime"))
+            if PK.risk_off(mode, d["ms"], d["br"]):
+                why = {"ma200": "大盤跌破 200 日均線", "ftd": "大盤在 200 日線下且還沒出現追蹤日", "breadth": "市場廣度不足（站上均線的股票太少）"}.get(mode, "大盤濾網")
+                target, why_out = [], why + "，全部出場空手"
             else:
                 keep = {c for c, _ in ranked[:top * 2]}
                 hold = [c for c in held if c in keep][:top]
