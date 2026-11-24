@@ -80,6 +80,7 @@ Open <http://localhost:8765>. On Windows you can also double-click `start.bat` f
 | **Android phone, no computer** | Install Termux → `pkg install git python` → clone → `bash deploy/run-android.sh` → open `http://localhost:8765` in Chrome |
 | Raspberry Pi / NAS | `deploy/nightmarket.service` (systemd) + Tailscale |
 | Docker | `docker build -t nightmarket . && docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=<secret> -v nightmarket-data:/data nightmarket` |
+| **Share a link with a friend** | `python server.py --share-port 8767 --share-url https://<machine>.<tailnet>.ts.net:10000`, then `tailscale funnel --bg --https=10000 http://127.0.0.1:8767`. Settings → *Share with a friend* gives a link with a secret key; they just open it (no Tailscale needed). Same features as you, and the paper accounts, alerts and settings are shared. Reset the link to revoke it |
 | Windows .exe | Download `NightMarket.exe` from [Releases](../../releases) (built by GitHub Actions), or build it yourself: `py -m pip install pyinstaller` then `build_exe.bat` |
 
 Open it on a phone and use **Add to Home Screen** to get an app icon (PWA). Add `?lang=en` or `?lang=zh` to the URL to force a language, and `#view=heatmap` (or `strategy`, `screener`, `multi`, `calendar`…) to open a page directly.

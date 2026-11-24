@@ -2612,6 +2612,8 @@ class Handler(SimpleHTTPRequestHandler):
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map, ".webmanifest": "application/manifest+json",
                       ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".svg": "image/svg+xml"}
 
+    is_share = False  # 從分享連結進來的連線
+
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=os.path.join(ROOT, "web"), **kw)
 
@@ -2728,6 +2730,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(ai_picks_api(q.get("mkt", "tw"), q.get("refresh") == "1"))
             elif u.path == "/api/ai/research":
                 self.send_json({**ai_research(), "status": _research, "meta": ai_meta()})
+            elif u.path == "/api/share":
+                self.send_json({"enabled": False, "guest": True} if self.is_share else share_info())
             else:
                 self.send_json({"error": "not found"}, 404)
         except Exception as e:
@@ -2774,6 +2778,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(ai_research_run(body.get("mkt", "all")))
             elif u.path == "/api/ai/run":
                 self.send_json(ai_run(body.get("mkt", "tw"), force=True))
+            elif u.path == "/api/share/reset" and not self.is_share:
+                share_token(reset=True)
+                self.send_json({"ok": True, **share_info()})
             elif u.path == "/api/paper/reset":
                 cash = {"TWD": float(body.get("TWD") or DEFAULT_CASH["TWD"]), "USD": float(body.get("USD") or DEFAULT_CASH["USD"])}
                 with _paper_lock:
@@ -2788,8 +2795,87 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json({"ok": False, "msg": str(e)}, 500)
 
 
-def start(port=PORT, host=None):
+SHARE_FILE = os.path.join(DATA_DIR, "share.json")  # 分享連結的密鑰
+SHARE = {"port": 0, "url": ""}
+
+
+def share_token(reset=False):
+    try:
+        with open(SHARE_FILE, encoding="utf-8") as f:
+            tok = json.load(f).get("token")
+    except (OSError, ValueError):
+        tok = None
+    if reset or not tok:
+        import secrets
+        tok = secrets.token_urlsafe(18)
+        with open(SHARE_FILE, "w", encoding="utf-8") as f:
+            json.dump({"token": tok}, f)
+    return tok
+
+
+def share_info():
+    if not SHARE["port"]:
+        return {"enabled": False}
+    tok = share_token()
+    base = SHARE["url"].rstrip("/") or f"http://localhost:{SHARE['port']}"
+    return {"enabled": True, "url": f"{base}/?k={tok}"}
+
+
+class ShareHandler(Handler):
+    """分享用的 port：功能跟本機完全一樣，只是要帶密鑰。
+    第一次用 /?k=密鑰 開啟後存成 cookie，之後直接連就好；重設密鑰後舊連結失效。"""
+    COOKIE = "nm_share"
+    is_share = True
+
+    def _authorized(self):
+        u = urllib.parse.urlparse(self.path)
+        # 網頁原始碼本來就公開在 GitHub，只擋首頁和 API
+        if u.path not in ("/", "/index.html") and not u.path.startswith("/api/"):
+            return True
+        tok = share_token()
+        k = urllib.parse.parse_qs(u.query).get("k", [""])[0]
+        if k and hmac.compare_digest(k, tok):
+            self._set_cookie = tok
+            return True
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            name, _, val = part.strip().partition("=")
+            if name == self.COOKIE and hmac.compare_digest(val, tok):
+                return True
+        return False
+
+    def _deny(self):
+        body = "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><title>NightMarket</title><body style='font:16px sans-serif;padding:40px;background:#111;color:#ddd'>連結已失效或不完整，請向分享給你的人重新索取連結。</body>".encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        self._set_cookie = None
+        if not self._authorized():
+            return self._deny()
+        if self._set_cookie:  # 帶密鑰進來：存 cookie，轉回乾淨的網址
+            self.send_response(302)
+            self.send_header("Set-Cookie", f"{self.COOKIE}={self._set_cookie}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax")
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        return super().do_GET()
+
+    def do_POST(self):
+        self._set_cookie = None
+        return super().do_POST()
+
+
+def start(port=PORT, host=None, share_port=0, share_url=""):
     os.makedirs(DATA_DIR, exist_ok=True)
+    if share_port:
+        SHARE.update(port=share_port, url=share_url)
+        share_token()
+        ssrv = ThreadingHTTPServer(("127.0.0.1", share_port), ShareHandler)
+        threading.Thread(target=ssrv.serve_forever, daemon=True).start()
     threading.Thread(target=stock_list, daemon=True).start()
     threading.Thread(target=paper_matcher, daemon=True).start()
     threading.Thread(target=strategy_monitor, daemon=True).start()
@@ -2815,10 +2901,15 @@ if __name__ == "__main__":
     ap.add_argument("--host", default=HOST, help="監聽位址，預設 127.0.0.1（只有本機）；0.0.0.0 讓同網路裝置連線")
     ap.add_argument("--port", type=int, default=PORT)
     ap.add_argument("--password", default=PASSWORD, help="非本機連線需要的密碼（建議 --host 0.0.0.0 時設定）")
+    ap.add_argument("--share-port", type=int, default=int(os.environ.get("NM_SHARE_PORT") or 0),
+                    help="另開一個只聽本機的分享用 port（要帶密鑰連結才能進），再用 tailscale funnel 等工具公開")
+    ap.add_argument("--share-url", default=os.environ.get("NM_SHARE_URL", ""), help="分享 port 對外的網址，例如 https://電腦.tailnet.ts.net:10000")
     args = ap.parse_args()
     PASSWORD = args.password
-    srv = start(args.port, args.host)
+    srv = start(args.port, args.host, args.share_port, args.share_url)
     print(f"看盤已啟動: http://localhost:{args.port}")
+    if args.share_port:
+        print(f"  分享連結: {share_info()['url']}")
     if args.host not in ("127.0.0.1", "localhost"):
         for ip in _lan_ips():
             print(f"  其他裝置可連: http://{ip}:{args.port}")

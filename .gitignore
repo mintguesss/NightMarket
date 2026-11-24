@@ -30,3 +30,4 @@ dist/
 *.spec
 PROMO.md
 __pycache__/
+share.json

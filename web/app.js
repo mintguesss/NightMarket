@@ -1040,12 +1040,15 @@ function settingsPanel() {
     <div class="fld"><label>語言 Language</label><select id="stLang"><option value="zh" ${LANG === 'zh' ? 'selected' : ''}>繁體中文</option><option value="en" ${LANG === 'en' ? 'selected' : ''}>English</option></select></div>
     <div class="fld"><label>夜盤資料</label><button class="btn sec" id="stAlpaca">設定 Alpaca 金鑰</button></div>
     <div class="fld"><label>推播通知</label><button class="btn sec" id="stNotify">設定 Telegram／Discord／ntfy</button></div>
+    <div class="fld" id="stShareRow" style="display:none"><label>分享給朋友</label><button class="btn sec" id="stShare">取得分享連結</button></div>
     <div class="fld"><label>版面</label><button class="btn sec" id="stLayout">重設左右欄寬度</button></div>
     <div class="fld"><label>資料</label><button class="btn sec" id="stExport">匯出設定與自選</button><button class="btn sec" id="stImport">匯入</button></div>
     <div class="hint">台股報價：證交所 MIS（若被限流自動改用 Yahoo）。美股：Yahoo Finance，夜盤：Alpaca（Blue Ocean ATS）。期權：期交所、Yahoo。新聞：Yahoo 股市、鉅亨網。日曆：Nasdaq、證交所。</div>`,
     [{ label: '取消' }, { label: '儲存', act: (m) => { const lang = m.querySelector('#stLang').value; if (lang !== LANG) { setLang(lang); return; } S.colorMode = m.querySelector('#stColor').value; S.theme = m.querySelector('#stTheme').value; S.refresh = +m.querySelector('#stRef').value; save('settings'); applyColors(); applyTheme(); rerender(true); renderWatch(); renderSide(); toast('設定已儲存'); } }]);
   $('#stNotify').onclick = () => { closeModal(); notifyPanel(); };
   $('#stAlpaca').onclick = () => { closeModal(); alpacaPanel(); };
+  api('/api/share').then((r) => { const row = $('#stShareRow'); if (r.enabled && row) row.style.display = ''; }).catch(() => {});
+  $('#stShare').onclick = () => { closeModal(); sharePanel(); };
   $('#stLayout').onclick = () => { state.layout = { lw: 440, rw: 320, noLeft: false, noRight: false }; applyLayout(); toast('已重設版面'); };
   $('#stExport').onclick = () => {
     const data = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('tw.')) data[k] = localStorage.getItem(k); }
@@ -1056,6 +1059,17 @@ function settingsPanel() {
     inp.onchange = async () => { try { const d = JSON.parse(await inp.files[0].text()); Object.entries(d).forEach(([k, v]) => k.startsWith('tw.') && localStorage.setItem(k, v)); toast('已匯入，重新載入中…'); setTimeout(() => location.reload(), 800); } catch { toast('檔案格式不正確'); } };
     inp.click();
   };
+}
+
+async function sharePanel() {
+  const r = await api('/api/share').catch(() => ({}));
+  if (!r.enabled) return toast('伺服器沒有開啟分享 port');
+  openModal('分享給朋友', `<div class="hint">把這個網址傳給朋友，手機或電腦點開就能用，功能跟你一樣；模擬倉、AI 模擬倉、策略提醒和設定是共用的。網址裡的密鑰等於鑰匙，不要公開張貼。</div>
+    <div class="fld"><input id="shUrl" readonly value="${esc(r.url)}" style="width:100%"></div>
+    <div class="fld"><button class="btn" id="shCopy">複製網址</button><button class="btn sec" id="shReset">重設連結（舊連結會失效）</button></div>`, [{ label: '關閉' }]);
+  $('#shUrl').onclick = (e) => e.target.select();
+  $('#shCopy').onclick = async () => { const v = $('#shUrl').value; try { await navigator.clipboard.writeText(v); toast('已複製'); } catch { $('#shUrl').select(); document.execCommand('copy'); toast('已複製'); } };
+  $('#shReset').onclick = async () => { const x = await post('/api/share/reset', {}); if (x.url) { $('#shUrl').value = x.url; toast('已產生新連結，舊連結已失效'); } };
 }
 
 /* ---------- 版面：收合與拖曳寬度 ---------- */

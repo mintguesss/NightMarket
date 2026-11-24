@@ -79,6 +79,7 @@ python server.py
 | **Android 手機單獨執行** | **否** | 安裝 Termux，`pkg install git python`、clone 這個 repo，執行 `bash deploy/run-android.sh`，用手機 Chrome 開 `http://localhost:8765` |
 | 樹莓派／NAS 常駐 | 否（小主機一直開） | 參考 `deploy/nightmarket.service`（systemd 開機自動執行），搭配 Tailscale |
 | Docker | 依主機而定 | `docker build -t nightmarket .`，`docker run -d -p 8765:8765 -e TWSTOCK_PASSWORD=密碼 -v nightmarket-data:/data nightmarket` |
+| **給朋友一個網址** | 是 | `python server.py --share-port 8767 --share-url https://<電腦名稱>.<tailnet>.ts.net:10000`，再執行 `tailscale funnel --bg --https=10000 http://127.0.0.1:8767`。到「設定 → 分享給朋友」複製帶密鑰的網址傳給對方，對方直接點開就能用，不用裝 Tailscale。功能跟你一樣，模擬倉、提醒與設定是共用的；按「重設連結」就能讓舊網址失效 |
 | Windows 執行檔 | 是 | 到 [Releases](../../releases) 下載 `NightMarket.exe`（GitHub Actions 自動打包），或自己執行 `py -m pip install pyinstaller` 後跑 `build_exe.bat` |
 
 **加入主畫面（PWA）**：用 `localhost` 或 HTTPS（例如 Tailscale serve）開啟時，手機瀏覽器選單的「加入主畫面」會變成一個 App 圖示，全螢幕開啟。iPhone 用 Safari 的「分享 → 加入主畫面」。
