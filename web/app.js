@@ -1075,7 +1075,8 @@ async function sharePanel() {
 /* ---------- 版面：收合與拖曳寬度 ---------- */
 function applyLayout() {
   const L = state.layout, app = $('#app');
-  app.style.setProperty('--lw', L.lw + 'px'); app.style.setProperty('--rw', L.rw + 'px');
+  // 收合時寬度要在這裡設 0：inline 的變數會蓋過 .no-left／.no-right 的 CSS
+  app.style.setProperty('--lw', (L.noLeft ? 0 : L.lw) + 'px'); app.style.setProperty('--rw', (L.noRight ? 0 : L.rw) + 'px');
   app.classList.toggle('no-left', L.noLeft); app.classList.toggle('no-right', L.noRight);
   $('[data-resize="left"] .rz-btn').textContent = L.noLeft ? '›' : '‹';
   $('[data-resize="right"] .rz-btn').textContent = L.noRight ? '‹' : '›';
