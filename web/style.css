@@ -872,3 +872,4 @@ html[data-theme="light"] .wreg { color: #3b55d9; background: rgba(59,85,217,.1);
 .sess-btn { padding: 3px 9px; margin-right: 6px; border-radius: 6px; border: 1px solid var(--line2); color: var(--text); font-size: 12.5px; white-space: nowrap; }
 .sess-btn.active { border-color: var(--accent); color: var(--accent); }
 .sess-btn:hover { border-color: var(--muted); }
+.btn-ghost.active { color: var(--accent); border-color: var(--accent); background: rgba(245,165,36,.1); }

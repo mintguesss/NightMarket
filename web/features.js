@@ -369,7 +369,7 @@ PAGES.multi = {
     $('#mtGrid').style.gridTemplateColumns = `repeat(${cols}, 1fr)`; $('#mtGrid').style.gridTemplateRows = `repeat(${Math.ceil(n / cols)}, 1fr)`;
     $('#mtGrid').innerHTML = Array.from({ length: n }, (_, i) => `<div class="mt-cell" data-i="${i}"><div class="mt-h"><input class="tin mt-code" value="${esc(showCode(codes[i] || ''))}" placeholder="代號"><b class="mt-name"></b><span class="flex1"></span><span class="mt-q num"></span><button class="icon-btn" data-open title="開啟大圖">⤢</button></div><div class="mt-chart"></div></div>`).join('');
     $$('#mtGrid .mt-cell').forEach((cell, i) => {
-      const chart = LightweightCharts.createChart(cell.querySelector('.mt-chart'), { ...chartOpts(true), rightPriceScale: { borderColor: '#262b38', minimumWidth: 56, scaleMargins: { top: 0.1, bottom: 0.06 } } });
+      const chart = LightweightCharts.createChart(cell.querySelector('.mt-chart'), { ...chartOpts(true), rightPriceScale: { borderColor: '#262b38', minimumWidth: 56, scaleMargins: { top: 0.1, bottom: 0.06 }, mode: state.pctAxis ? 2 : 0 } });
       mtState.charts[i] = { chart, code: codes[i] || null, series: [] };
     });
     this.updateAll(true);
@@ -388,7 +388,7 @@ PAGES.multi = {
     try {
       const d = await this.fetchK(code, P);
       if (mtState.charts[i] !== m || m.code !== code || mtState.period !== period) return;
-      const off = d.gmtoffset ?? 8 * 3600, q = state.quotes[code];
+      const off = d.gmtoffset ?? 8 * 3600, doff = isUS(code) ? 8 * 3600 : off, q = state.quotes[code]; // 美股圖表用台北時間顯示
       let bars = d.bars; if (period === 'tick' && bars.length) { const day = Math.floor((bars.at(-1).t + off) / 86400); bars = bars.filter((b) => Math.floor((b.t + off) / 86400) === day); }
       if (P.agg) bars = aggregate(bars, P.agg, off);
       bars = sanitizeBars(bars, P.agg || STEP_OF[P.interval]);
@@ -397,10 +397,10 @@ PAGES.multi = {
       cell.querySelector('.mt-name').textContent = nameOf(code);
       this.showQ(i);
       const c = bars.map((b) => b.c), mas = [[20, '#f5a524'], [60, '#26c6da']];
-      const maData = (n) => { const v = IND.sma(c, n); return bars.map((b, j) => (v[j] == null ? { time: b.t + off } : { time: b.t + off, value: v[j] })); };
-      const lineD = bars.map((b) => ({ time: b.t + off, value: b.c })), candleD = bars.map((b) => ({ time: b.t + off, open: b.o, high: b.h, low: b.l, close: b.c }));
+      const maData = (n) => { const v = IND.sma(c, n); return bars.map((b, j) => (v[j] == null ? { time: b.t + doff } : { time: b.t + doff, value: v[j] })); };
+      const lineD = bars.map((b) => ({ time: b.t + doff, value: b.c })), candleD = bars.map((b) => ({ time: b.t + doff, open: b.o, high: b.h, low: b.l, close: b.c }));
       const base = period === 'tick' ? q?.prev : bars[0].c, col = bars.at(-1).c >= (base ?? 0) ? UP : DOWN;
-      m.bars = bars; m.off = off; m.step = P.agg || STEP_OF[P.interval] || 0;
+      m.bars = bars; m.off = off; m.doff = doff; m.step = P.agg || STEP_OF[P.interval] || 0;
       if (!full) { // 只更新資料
         if (P.line) { m.series[0].applyOptions({ lineColor: col, topColor: col + '33', bottomColor: col + '00' }); m.series[0].setData(lineD); }
         else { m.series[0].setData(candleD); mas.forEach(([n], k) => m.series[k + 1]?.setData(maData(n))); }
@@ -447,7 +447,7 @@ PAGES.multi = {
     } else if (mtState.period === 'D' && day(t) > day(last.t)) { // 日K：新的一天
       b = { t: t, o: q.open ?? px, h: q.high ?? px, l: q.low ?? px, c: px, v: 0 }; bars.push(b);
     } else { b.c = px; b.h = Math.max(b.h, px); b.l = Math.min(b.l, px); }
-    s.update(P.line ? { time: b.t + m.off, value: b.c } : { time: b.t + m.off, open: b.o, high: b.h, low: b.l, close: b.c });
+    s.update(P.line ? { time: b.t + m.doff, value: b.c } : { time: b.t + m.doff, open: b.o, high: b.h, low: b.l, close: b.c });
   },
   showQ(i) {
     const m = mtState.charts[i], cell = $$('#mtGrid .mt-cell')[i]; if (!m?.code || !cell) return;
@@ -468,6 +468,7 @@ $('#mtBack').addEventListener('click', () => setView('chart'));
 $('#mtLayout').addEventListener('click', (e) => { const b = e.target.closest('[data-l]'); if (!b) return; mtState.layout = +b.dataset.l; store.set('tw.mtLayout', mtState.layout); PAGES.multi.load(); });
 $('#mtPeriod').addEventListener('click', (e) => { const b = e.target.closest('[data-p]'); if (!b) return; mtState.period = b.dataset.p; store.set('tw.mtPeriod', mtState.period); PAGES.multi.load(); });
 $('#mtMore').addEventListener('change', (e) => { if (!e.target.value) return; mtState.period = e.target.value; store.set('tw.mtPeriod', mtState.period); PAGES.multi.load(); });
+$('#mtPct').addEventListener('click', () => togglePctAxis());
 $('#mtFill').addEventListener('click', () => { mtSave(state.watch.slice(0, 9)); PAGES.multi.build(); });
 $('#mtGrid').addEventListener('change', (e) => {
   if (!e.target.classList.contains('mt-code')) return;

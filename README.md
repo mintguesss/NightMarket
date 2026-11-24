@@ -29,7 +29,7 @@ python server.py        # then open http://localhost:8765
 
 | | |
 |---|---|
-| **Charts** | 1D/5D intraday, 1m–4h, daily/weekly/monthly/quarterly/yearly · 6 overlays (MA, EMA, Bollinger, SAR, Envelope, Donchian) · 16 indicator panes (Volume, MACD, KD, RSI, BIAS, W%R, CCI, DMI, OBV, ATR, ROC, MTM, PSY, TRIX, DMA, VR) with adjustable parameters |
+| **Charts** | 1D/5D intraday, 1m–4h, daily/weekly/monthly/quarterly/yearly · US overnight session (20:00–04:00 ET) with a free Alpaca key · price axis switchable to % change · live ticks only update the last bar · 6 overlays (MA, EMA, Bollinger, SAR, Envelope, Donchian) · 16 indicator panes (Volume, MACD, KD, RSI, BIAS, W%R, CCI, DMI, OBV, ATR, ROC, MTM, PSY, TRIX, DMA, VR) with adjustable parameters |
 | **Drawing tools** | Trend line, ray, extended line, horizontal/vertical lines, parallel channel, rectangle, Fibonacci, measure, text — draggable, magnet snap, saved per symbol |
 | **Strategies & backtesting** | Visual condition builder (crosses above/below, >, <, …) over 38 price, volume and indicator inputs (MA, RSI, MACD, KD, Bollinger %B/width, ADX/DMI, CCI, Williams %R, MFI, OBV, SAR, bias, gaps, streaks, distance from N-day high…) · 16 templates · stop loss, take profit, trailing stop, max holding days · equity curve vs. buy & hold, CAGR, max drawdown, Sharpe, win rate, profit factor, trade log · fees and taxes included, next-open fills (no look-ahead) |
 | **Alerts & push** | Strategies are checked every minute during market hours (even with the page closed) · push to **Telegram**, **Discord** or **ntfy** · optional auto-trading in the paper account · simple price alerts too |

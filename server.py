@@ -1548,7 +1548,10 @@ def alpaca_latest(codes):
 _alp_delayed = [False]  # 免費方案不能查最近 15 分鐘的 BOATS 分K
 
 
-def alpaca_night_bars(code, start, end):
+ALP_TF = {"1Min": 60, "5Min": 300, "15Min": 900, "30Min": 1800}
+
+
+def alpaca_night_bars(code, start, end, tf="1Min"):
     if not code.startswith("US."):
         return {"bars": [], "error": "只有美股有夜盤"}
     if not alpaca_on():
@@ -1559,11 +1562,12 @@ def alpaca_night_bars(code, start, end):
         return {"bars": []}
     iso = lambda t: datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     sym = _alp_sym(code)
+    tf = tf if tf in ALP_TF else "1Min"; step = ALP_TF[tf]
 
     def get(stop):
         bars, tok = [], None
         for _ in range(5):
-            prm = {"symbols": sym, "timeframe": "1Min", "start": iso(start), "end": iso(stop), "limit": 10000, "sort": "asc", "feed": "boats"}
+            prm = {"symbols": sym, "timeframe": tf, "start": iso(start), "end": iso(stop), "limit": 10000, "sort": "asc", "feed": "boats"}
             if tok:
                 prm["page_token"] = tok
             d = _alp_get("/v2/stocks/bars", prm)
@@ -1588,12 +1592,15 @@ def alpaca_night_bars(code, start, end):
                 bars = get(stop) if stop > start else []
         if _alp_delayed[0] and end > now - 16 * 60:  # 最近 15 分鐘用最新成交補一根，之後由即時報價接著畫
             x = alpaca_latest([code]).get(code)
-            if x and start <= x["ts"] < end and (not bars or x["ts"] >= bars[-1]["t"] + 60):
-                t = x["ts"] // 60 * 60
-                bars.append({"t": t, "o": x["price"], "h": x["price"], "l": x["price"], "c": x["price"], "v": 0})
+            if x and start <= x["ts"] < end:
+                t = x["ts"] // step * step
+                if bars and bars[-1]["t"] == t:
+                    b = bars[-1]; b["c"] = x["price"]; b["h"] = max(b["h"], x["price"]); b["l"] = min(b["l"], x["price"])
+                elif not bars or t > bars[-1]["t"]:
+                    bars.append({"t": t, "o": x["price"], "h": x["price"], "l": x["price"], "c": x["price"], "v": 0})
         return {"bars": bars, "delayed": _alp_delayed[0]}
     try:
-        return cached(f"alp:bars:{sym}:{start}:{end // 30}:{now // 30}", 20, load)
+        return cached(f"alp:bars:{sym}:{tf}:{start}:{end // 30}:{now // 30}", 20, load)
     except AlpacaError as e:
         return {"bars": [], "error": str(e)}
 
@@ -2507,6 +2514,29 @@ def us_snapshot():
     return cached("ussnap", 120, load)
 
 
+def us_live_changes(codes):
+    """美股最新一個交易日的價格與漲跌幅：有 Alpaca 金鑰就用批次快照（一次 100 檔），否則用 Yahoo 報價。"""
+    out = {}
+    if alpaca_on():
+        try:
+            for i in range(0, len(codes), 100):
+                part = codes[i:i + 100]
+                d = _alp_get("/v2/stocks/snapshots", {"symbols": ",".join(_alp_sym(c) for c in part), "feed": "iex"})
+                for c in part:
+                    x = d.get(_alp_sym(c)) or {}
+                    cur, prev = (x.get("dailyBar") or {}).get("c"), (x.get("prevDailyBar") or {}).get("c")
+                    if cur and prev:
+                        out[c] = {"price": cur, "pct": (cur / prev - 1) * 100}
+            if out:
+                return out
+        except Exception as e:
+            print("alpaca snapshot error:", e, file=sys.stderr)
+    for c, q in (_safe(quotes, codes, {}) or {}).items():
+        if q.get("price") and q.get("prev"):
+            out[c] = {"price": q["price"], "pct": (q["price"] / q["prev"] - 1) * 100}
+    return out
+
+
 US_SECTOR_ZH = {"Technology": "科技", "Health Care": "醫療保健", "Finance": "金融", "Consumer Discretionary": "非必需消費", "Industrials": "工業",
                 "Energy": "能源", "Utilities": "公用事業", "Real Estate": "房地產", "Basic Materials": "原物料", "Consumer Staples": "必需消費",
                 "Telecommunications": "通訊", "Miscellaneous": "其他", "Other": "其他"}
@@ -2514,10 +2544,15 @@ US_SECTOR_ZH = {"Technology": "科技", "Health Care": "醫療保健", "Finance"
 
 def heatmap(mkt):
     if mkt == "us":
-        rows = sorted((r for r in us_snapshot() if r["mcap"] > 0), key=lambda r: -r["mcap"])[:300]
+        rows = [dict(r) for r in sorted((r for r in us_snapshot() if r["mcap"] > 0), key=lambda r: -r["mcap"])[:300]]
+        live = cached("hm:usq", 60, lambda: us_live_changes([r["code"] for r in rows]))  # Nasdaq 快照常停在前一個交易日，用即時資料蓋過去
         for r in rows:
             r["industryZh"] = US_SECTOR_ZH.get(r["industry"], r["industry"])
-        return {"mkt": "us", "rows": rows, "live": True, "updated": int(time.time())}
+            x = live.get(r["code"])
+            if x:
+                r["mcap"] = r["mcap"] * x["price"] / r["price"] if r.get("price") else r["mcap"]
+                r["price"], r["pct"] = x["price"], x["pct"]
+        return {"mkt": "us", "rows": rows, "live": bool(live), "updated": int(time.time())}
     rows = sorted((r for r in tw_snapshot() if r.get("mcap") and r["industry"] not in ("ETF", "存託憑證")), key=lambda r: -r["mcap"])[:250]
     rows = [dict(r) for r in rows]
 
@@ -2672,7 +2707,7 @@ class Handler(SimpleHTTPRequestHandler):
             elif u.path == "/api/config/alpaca":
                 self.send_json(config_alpaca_public())
             elif u.path == "/api/overnight":
-                self.send_json(alpaca_night_bars(q["code"], q["start"], q["end"]))
+                self.send_json(alpaca_night_bars(q["code"], q["start"], q["end"], q.get("tf", "1Min")))
             elif u.path == "/api/heatmap":
                 self.send_json(heatmap(q.get("mkt", "tw")))
             elif u.path == "/api/calweek":

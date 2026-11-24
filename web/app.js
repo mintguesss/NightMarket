@@ -84,7 +84,7 @@ const state = {
   sideTab: 'book',
   list: [], listMap: {}, names: store.get('tw.names', {}),
   quotes: {}, sparks: {},
-  bars: [], prev: null, off: 8 * 3600, sessionEnd: null, lastVol: null,
+  bars: [], prev: null, off: 8 * 3600, dOff: 8 * 3600, sessionEnd: null, lastVol: null,
   paper: null, paperAI: null, paperAcct: store.get('tw.paperAcct', 'me'),
   ticket: { side: 'buy', type: 'limit', unit: 1000, price: '', qty: 1 },
   magnet: store.get('tw.magnet2', false), // 預設關閉磁吸，畫線完全自由
@@ -248,7 +248,7 @@ new ResizeObserver(([e]) => {
   else { const n = state.bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); }
 }).observe($('#chartMain'));
 const draw = new Drawings($('#paneMain'), mainChart, {
-  series: () => primary, bars: () => state.bars, off: () => state.off, magnet: () => state.magnet,
+  series: () => primary, bars: () => state.bars, off: () => state.dOff, magnet: () => state.magnet,
   step: () => { const P = PERIODS[state.period]; return P.agg || STEP_OF[P.interval] || { '1d': 86400, '1wk': 604800, '1mo': 2629800 }[P.interval] || 0; },
   save: (items) => store.set('tw.draw.' + state.code, items),
 });
@@ -265,7 +265,8 @@ function mkSeries(chart, list, type, opts) {
   const s = chart['add' + type + 'Series'](opts); s._type = type; list.push(s); return s;
 }
 const priceLine = (s, o) => { if (!SOFT && s) s.createPriceLine(o); };
-const toTime = (t) => t + state.off;
+// 圖表上的時間：美股改用台北時間顯示（state.dOff），日期分組等邏輯仍用交易所時區（state.off）
+const toTime = (t) => t + state.dOff;
 const lineData = (bars, vals) => bars.map((b, i) => (vals[i] == null || isNaN(vals[i]) ? { time: toTime(b.t) } : { time: toTime(b.t), value: vals[i] }));
 function addLine(chart, list, l, bars) {
   const s = mkSeries(chart, list, 'Line', { color: l.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
@@ -457,7 +458,7 @@ async function loadKline(keepRange = false) {
   try {
     const d = await api(`/api/kline?code=${encodeURIComponent(code)}&interval=${P.interval}&range=${P.range}${useExt() ? '&ext=1' : ''}`);
     if (seq !== klineSeq) return;
-    state.off = d.gmtoffset ?? 8 * 3600; state.sessionEnd = d.ext && d.postEnd ? d.postEnd : d.sessionEnd;
+    state.off = d.gmtoffset ?? 8 * 3600; state.dOff = isUS(code) ? 8 * 3600 : state.off; state.sessionEnd = d.ext && d.postEnd ? d.postEnd : d.sessionEnd;
     state.regular = d.ext ? d.regular || [] : []; state.postEnd = d.postEnd;
     let bars = d.bars;
     if (state.period === 'tick' && bars.length) { const lastDay = Math.floor((bars[bars.length - 1].t + state.off) / 86400); bars = bars.filter((b) => Math.floor((b.t + state.off) / 86400) === lastDay); }
@@ -468,7 +469,7 @@ async function loadKline(keepRange = false) {
       // 夜盤：現在正在夜盤就看這一晚（當地 20:00 起 8 小時，週日晚上也算），否則看最近一個交易日開盤前那一晚
       const nightNow = state.quotes[code]?.session === 'OVERNIGHT';
       const lh = ((((now + state.off) / H) % 24) + 24) % 24, n0 = now - ((lh - 20 + 24) % 24) * H;
-      const W = { all: [reg[0] - 5.5 * H, reg[1] + 4 * H], pre: [reg[0] - 5.5 * H, reg[0]], reg: [reg[0], reg[1]], post: [reg[1], reg[1] + 4 * H],
+      const W = { all: [reg[0] - 13.5 * H, reg[1] + 4 * H], // 全天＝前一晚夜盤＋盤前＋盤中＋盤後 pre: [reg[0] - 5.5 * H, reg[0]], reg: [reg[0], reg[1]], post: [reg[1], reg[1] + 4 * H],
         night: nightNow ? [n0, n0 + 8 * H] : [reg[0] - 13.5 * H, reg[0] - 5.5 * H] }[m];
       bars = bars.filter((b) => b.t >= W[0] && b.t < W[1]);
       state.tickWin = W; state.sessShown = m; state.sessionEnd = W[1];
@@ -478,6 +479,22 @@ async function loadKline(keepRange = false) {
         const n = await api(`/api/overnight?code=${encodeURIComponent(code)}&start=${Math.floor(W[0])}&end=${Math.floor(W[1])}`).catch((e) => ({ bars: [], error: e.message }));
         if (seq !== klineSeq) return;
         bars = n.bars || []; state.nightErr = n.error || null;
+      }
+    }
+    // 美股夜盤（美東 20:00–04:00）Yahoo 沒有：分時「全天」與開啟盤前盤後的分鐘K，向 Alpaca 補上夜盤K棒
+    const wantNight = isUS(code) && !code.includes('^') && bars.length && ((sessOn() && state.sessShown === 'all') || (state.period !== 'tick' && useExt() && P.interval.endsWith('m')));
+    if (wantNight) {
+      const step = STEP_OF[P.interval] || 60, tf = step >= 1800 ? '30Min' : step >= 900 ? '15Min' : step >= 300 ? '5Min' : '1Min';
+      const s0 = state.tickWin ? state.tickWin[0] : bars[0].t, s1 = state.tickWin ? state.tickWin[1] : Date.now() / 1000;
+      const n = await api(`/api/overnight?code=${encodeURIComponent(code)}&start=${Math.floor(s0)}&end=${Math.floor(s1)}&tf=${tf}`).catch(() => null);
+      if (seq !== klineSeq) return;
+      if (n?.bars?.length) {
+        const al = step >= 3600 ? 1800 : 0, have = new Set(bars.map((b) => b.t)), m = new Map(); // 60 分K 跟 Yahoo 一樣對齊在 :30
+        for (const b of n.bars) {
+          const t = Math.floor((b.t - al) / step) * step + al, x = m.get(t);
+          if (!x) m.set(t, { ...b, t }); else { x.h = Math.max(x.h, b.h); x.l = Math.min(x.l, b.l); x.c = b.c; x.v += b.v; }
+        }
+        bars = [...bars, ...[...m.values()].filter((b) => !have.has(b.t))].sort((a, b) => a.t - b.t);
       }
     }
     if (P.agg) bars = aggregate(bars, P.agg, state.off);
@@ -510,7 +527,7 @@ function liveUpdate() {
   if (sessOn() && state.sessMode === 'auto' && state.sessShown && sessResolved() !== state.sessShown) { loadKline(); return; }
   if (sessOn() && state.tickWin && q && ((state.sessShown === 'night' && !q.ext?.night) || (q.ext?.ts || q.ts) >= state.tickWin[1])) return;
   if (q && sessOn() && state.sessShown === 'night' && q.ext?.night) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
-  if (q && useExt() && (q.session === 'PRE' || q.session === 'POST') && q.ext?.ts) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
+  if (q && useExt() && (q.session === 'PRE' || q.session === 'POST' || (q.session === 'OVERNIGHT' && q.ext?.night)) && q.ext?.ts) q = { ...q, ts: q.ext.ts, price: q.ext.price, volume: null, isOpen: true };
   if (!q?.ts || q.price == null || !state.bars.length || !q.isOpen) return;
   const step = INTRADAY_LIVE.has(state.period) ? P.agg || ({ '1m': 60, '2m': 120, '5m': 300 }[P.interval]) : 0;
   if (!step && P.interval !== '1d' && P.interval !== '1wk' && P.interval !== '1mo') return;
@@ -567,7 +584,7 @@ function renderDrawBar() {
 draw.onTool = () => renderDrawBar();
 draw.onConvert = () => toast('已轉成手畫線，可以拖曳調整');
 // 自動畫線：勾選要哪些（可複選），勾了就畫，全部取消就關掉
-function updateAuto() { draw.setAuto(state.autoKinds.length ? autoDraw(state.bars, state.off, state.autoKinds) : []); }
+function updateAuto() { draw.setAuto(state.autoKinds.length ? autoDraw(state.bars, state.dOff, state.autoKinds) : []); }
 function autoPop(btn) {
   let p = $('#autoPop');
   if (p) { p.remove(); return; }
@@ -680,6 +697,7 @@ $('#watchList').addEventListener('click', (e) => { const r = e.target.closest('.
 ['#paneMain', '#paneSub1', '#paneSub2'].forEach((s) => $(s).addEventListener('contextmenu', (e) => {
   if (draw.tool !== 'cursor') return; e.preventDefault();
   openMenu(e.clientX, e.clientY, [
+    { label: state.pctAxis ? '價格軸改回價格' : '價格軸改成百分比', act: togglePctAxis },
     { label: '回到最新 K 棒', act: () => { const n = state.bars.length; mainChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - 120), to: n + 4 }); allCharts.forEach((c) => c.priceScale('right').applyOptions({ autoScale: true })); } },
     { label: '重設圖表（重新載入）', act: () => resetChart() },
   ]);
@@ -1358,3 +1376,14 @@ function toggleFullscreen(el) {
 }));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.body.classList.contains('pseudo-fs')) toggleFullscreen(); });
 $('#chartFsBtn').addEventListener('click', () => toggleFullscreen($('#viewChart')));
+// 價格軸：價格 / 漲跌百分比（以畫面最左邊那根 K 棒為 0%）。主圖與多圖共用同一個設定
+state.pctAxis = store.get('tw.pctAxis', false);
+function applyPctAxis() {
+  mainChart.priceScale('right').applyOptions({ mode: state.pctAxis ? LightweightCharts.PriceScaleMode.Percentage : LightweightCharts.PriceScaleMode.Normal });
+  $('#pctBtn').classList.toggle('active', state.pctAxis); $('#mtPct')?.classList.toggle('active', state.pctAxis);
+  if (typeof mtState !== 'undefined') mtState.charts.forEach((m) => m?.chart.priceScale('right').applyOptions({ mode: state.pctAxis ? 2 : 0 }));
+  setTimeout(() => draw.redraw(), 30);
+}
+function togglePctAxis() { state.pctAxis = !state.pctAxis; store.set('tw.pctAxis', state.pctAxis); applyPctAxis(); toast(state.pctAxis ? '價格軸：漲跌百分比' : '價格軸：價格'); }
+$('#pctBtn').addEventListener('click', togglePctAxis);
+applyPctAxis();

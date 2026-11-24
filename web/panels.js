@@ -229,7 +229,7 @@
   mainChart.subscribeCrosshairMove((p) => {
     if (cur !== 'chips' || state.layout.noRight || state.period !== 'D' || chipsBars.code !== state.code) return;
     let idx = null;
-    if (p.time) { const t = p.time - state.off; idx = chipsBars.bars.findIndex((b) => Math.abs(b.t - t) < 43200); if (idx < 0) idx = null; }
+    if (p.time) { const t = p.time - state.dOff; idx = chipsBars.bars.findIndex((b) => Math.abs(b.t - t) < 43200); if (idx < 0) idx = null; }
     if (idx !== chipsIdx) { chipsIdx = idx; drawChips(idx); }
   });
 
