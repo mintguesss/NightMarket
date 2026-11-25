@@ -378,10 +378,14 @@ def opt_quote(code):
 
 def quotes(codes):
     opts = [c for c in codes if c.startswith("OPT.")]
-    codes = [c for c in codes if not c.startswith("OPT.")]
+    futs = [c for c in codes if is_fut(c)]
+    codes = [c for c in codes if not c.startswith("OPT.") and not is_fut(c)]
     tw = [c for c in codes if is_tw(c)]
     other = [c for c in codes if not is_tw(c)]
     out = tw_quotes(tw) if tw else {}
+    for q in POOL.map(lambda c: _safe(fut_quote, c, None), futs):
+        if q:
+            out[q["code"]] = q
     for q in POOL.map(lambda c: _safe(opt_quote, c, None), opts):
         if q:
             out[q["code"]] = q
@@ -402,8 +406,167 @@ def _us_dst_now():
     return _us_dst(datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+# ---------------- 台指期（近月連續） ----------------
+# K線用奇摩股市的「台指期近一」（WTX&，含夜盤、自動換月），報價用期交所 MIS（日盤 MarketType 0、夜盤 1）
+FUT = {"FUT.TXF": ("TXF", "WTX&", "台指期近月"), "FUT.MXF": ("MXF", "WMT&", "小台指近月")}
+FUT_DAY, FUT_NIGHT = (8 * 60 + 45, 13 * 60 + 45), (15 * 60, 5 * 60)
+
+
+def is_fut(code):
+    return code in FUT
+
+
+def fut_session(now=None):
+    """現在的時段：'day'、'night'，休市回傳 None（國定假日不判斷）"""
+    n = now or datetime.now(TW)
+    m, wd = n.hour * 60 + n.minute, n.weekday()
+    if wd < 5 and FUT_DAY[0] <= m < FUT_DAY[1]:
+        return "day"
+    if (wd < 5 and m >= FUT_NIGHT[0]) or (1 <= wd <= 5 and m < FUT_NIGHT[1]):
+        return "night"
+    return None
+
+
+def _fut_tday(ts):
+    """這筆成交屬於哪個交易日（夜盤算下一個交易日），回傳當天台北 01:00 的時間戳"""
+    n = datetime.fromtimestamp(ts, TW)
+    m = n.hour * 60 + n.minute
+    if m >= FUT_NIGHT[0] or m < FUT_NIGHT[1]:
+        d = (n - timedelta(hours=5)).date() + timedelta(days=1)
+        while d.weekday() >= 5:
+            d += timedelta(days=1)
+    else:
+        d = n.date()
+    return int(datetime(d.year, d.month, d.day, 1, tzinfo=TW).timestamp())
+
+
+def fut_quote(code):
+    cid, _, name = FUT[code]
+    n = datetime.now(TW)
+    m = n.hour * 60 + n.minute
+    night = not (n.weekday() < 5 and FUT_DAY[0] <= m < FUT_NIGHT[0])  # 平日 08:45–15:00 看日盤，其餘看夜盤
+
+    def load():
+        rows = taifex_post({**_tf_body("F", cid), "MarketType": "1" if night else "0"})
+        pat = re.compile("^" + cid + r"[A-L]\d-" + ("M" if night else "F") + "$")
+        r = next((x for x in rows if pat.match(x["SymbolID"])), None)
+        if not r:
+            return None
+        q = _tfq(r)
+        ts = int(time.time())
+        if q["date"] and q["time"] and len(q["time"]) >= 4:
+            t = q["time"].zfill(6)
+            dt = datetime(int(q["date"][:4]), int(q["date"][4:6]), int(q["date"][6:8]), int(t[:2]), int(t[2:4]), int(t[4:6]), tzinfo=TW)
+            # 夜盤過了午夜，日期欄位可能還是開盤那天：取最接近現在、又不在未來的那一個
+            cands = [int((dt + timedelta(days=k)).timestamp()) for k in (0, 1)]
+            ok = [c for c in cands if c <= time.time() + 300]
+            ts = max(ok) if ok else cands[0]
+        return {"code": code, "name": name, "contract": q["name"], "mkt": "fut", "price": q["last"] or q["ref"], "prev": q["ref"],
+                "open": q["open"], "high": q["high"], "low": q["low"], "volume": q["vol"], "oi": q["oi"], "bid": q["bid"], "ask": q["ask"],
+                "ts": ts, "tday": _fut_tday(ts), "time": datetime.fromtimestamp(ts, TW).strftime("%H:%M:%S"), "date": q["date"],
+                "session": "NIGHT" if night else "DAY", "isOpen": fut_session() is not None, "currency": "TWD"}
+    return cached(f"fq:{code}:{night}", 4, load)
+
+
+def _ytw_chart(sym, extra, ttl):
+    url = ("https://tw.stock.yahoo.com/_td-stock/api/resource/FinanceChartService.ApacLibraCharts;symbols="
+           + urllib.parse.quote(json.dumps([sym]), safe="") + extra)
+    return cached("ytw:" + sym + extra, ttl, lambda: fetch_json(url)[0]["chart"])
+
+
+def _fut_sess_start(t):
+    """t 所在時段的開盤時間（夜盤 15:00、日盤 08:45）"""
+    n = datetime.fromtimestamp(t, TW)
+    m = n.hour * 60 + n.minute
+    if m >= FUT_NIGHT[0] or m < FUT_NIGHT[1]:
+        d = (n - timedelta(hours=5)).date()
+        return int(datetime(d.year, d.month, d.day, 15, tzinfo=TW).timestamp())
+    return int(datetime(n.year, n.month, n.day, 8, 45, tzinfo=TW).timestamp())
+
+
+def _fut_agg(bars, step):
+    out, key = [], None
+    for b in bars:
+        s0 = _fut_sess_start(b["t"])
+        k = s0 + (b["t"] - s0) // step * step
+        if k != key:
+            out.append(dict(b, t=k)); key = k
+        else:
+            c = out[-1]; c["h"] = max(c["h"], b["h"]); c["l"] = min(c["l"], b["l"]); c["c"] = b["c"]; c["v"] += b["v"]
+    return out
+
+
+def fut_kline(code, interval, rng):
+    _, ysym, _ = FUT[code]
+    intraday = interval.endswith("m")
+    if interval in ("1m", "2m"):
+        src, step = ";type=tick", 60
+    elif interval == "90m":
+        src, step = ";period=30m", 1800
+    else:
+        src = ";period=" + {"5m": "5m", "15m": "15m", "30m": "30m", "60m": "60m", "1d": "d", "1wk": "w", "1mo": "m", "3mo": "m"}[interval]
+        step = STEP.get(interval, 0)
+    c = _ytw_chart(ysym, src, 5 if intraday else 60)
+    meta, ts = c.get("meta") or {}, c.get("timestamp") or []
+    q = c["indicators"]["quote"][0]
+    bars = []
+    for i, t in enumerate(ts):
+        o, h, l, cl, v = (q[k][i] for k in ("open", "high", "low", "close", "volume"))
+        if None in (o, h, l, cl):
+            continue
+        if intraday:
+            # 奇摩以K棒「結束」時間標記、對齊整點（60 分K 是 09:00、10:00…13:00、13:45），改成「開始」時間：
+            # 往前取整到週期，但不早於該時段開盤；開盤競價那一筆（08:45、15:00）不動
+            n = datetime.fromtimestamp(t, TW)
+            if (n.hour * 60 + n.minute) not in (FUT_DAY[0], FUT_NIGHT[0]):
+                t = max((t - 1) // step * step, _fut_sess_start(t - 1))
+        if src != ";type=tick":
+            v = round((v or 0) * 1000)  # 分時以外的量是「千口」
+        bars.append({"t": t, "o": o, "h": h, "l": l, "c": cl, "v": v or 0})
+    if interval in ("2m", "90m"):
+        bars = _fut_agg(bars, STEP[interval])
+    elif intraday:  # 開盤競價和第一分鐘落在同一個時間，合併
+        mb = []
+        for b in bars:
+            if mb and mb[-1]["t"] == b["t"]:
+                x = mb[-1]; x["h"] = max(x["h"], b["h"]); x["l"] = min(x["l"], b["l"]); x["c"] = b["c"]; x["v"] += b["v"]
+            else:
+                mb.append(dict(b))
+        bars = mb
+    elif interval == "3mo":
+        qb, key = [], None
+        for b in bars:
+            n = datetime.fromtimestamp(b["t"], TW)
+            k = (n.year, (n.month - 1) // 3)
+            if k != key:
+                qb.append(dict(b)); key = k
+            else:
+                x = qb[-1]; x["h"] = max(x["h"], b["h"]); x["l"] = min(x["l"], b["l"]); x["c"] = b["c"]; x["v"] += b["v"]; x["t"] = b["t"]
+        bars = qb
+    sessions = []
+    if src == ";type=tick" and ts:  # 這個交易日的夜盤、日盤時段（分時用來補空白）
+        starts = [ts[0]] + [b for a, b in zip(ts, ts[1:]) if b - a > 60]
+        for s0 in starts:  # 日盤 08:45–13:45、夜盤 15:00–05:00（奇摩預排的時間只到 13:43，不能直接用）
+            day = datetime.fromtimestamp(s0, TW).hour < 12
+            sessions.append([s0, s0 + (5 if day else 14) * 3600])
+    return {"symbol": ysym, "bars": bars, "prev": meta.get("previousClose"), "gmtoffset": 8 * 3600,
+            "sessionStart": sessions[0][0] if sessions else None, "sessionEnd": sessions[-1][1] if sessions else None,
+            "sessions": sessions, "ext": False, "regular": [], "contract": meta.get("name")}
+
+
+def fut_spark(code):
+    c = _ytw_chart(FUT[code][1], ";type=tick", 30)
+    ts, cl = c.get("timestamp") or [], c["indicators"]["quote"][0].get("close") or []
+    pts = [(t, v) for t, v in zip(ts, cl) if v is not None]
+    pts = pts[::3] + ([pts[-1]] if pts and (len(pts) - 1) % 3 else [])
+    return {"t": [p[0] for p in pts], "c": [p[1] for p in pts], "prev": (c.get("meta") or {}).get("previousClose"),
+            "start": ts[0] if ts else None, "end": ts[-1] if ts else None}
+
+
 # ---------------- K 線 (Yahoo) ----------------
 def kline(code, interval, rng, ext=False):
+    if is_fut(code):
+        return fut_kline(code, interval, rng)
     sym = yahoo_symbol(code)
     pre = "true" if (code.startswith("US.") and interval.endswith("m") and rng in ("1d", "5d")) else "false"
     url = (f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}"
@@ -488,8 +651,8 @@ def merge_tw_today(code, interval, bars):
 
 
 def sparks(codes):
-    syms = {yahoo_symbol(c): c for c in codes}
-    out = {}
+    out = {c: v for c in codes if is_fut(c) for v in [_safe(fut_spark, c, None)] if v}
+    syms = {yahoo_symbol(c): c for c in codes if not is_fut(c)}
     keys = list(syms)
 
     def one(part):

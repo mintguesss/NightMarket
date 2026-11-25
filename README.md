@@ -123,7 +123,8 @@ The engine lives in [`strategy.py`](strategy.py) (standard library only) and can
 | Taiwan quotes & order book | TWSE MIS | ~5 s |
 | Taiwan intraday bars | Yahoo Taiwan | real time |
 | Taiwan fallback quotes | Yahoo Finance | ~20 min delay (only if MIS is unreachable; the UI says so) |
-| TAIEX futures & options | TAIFEX MIS | real time |
+| TAIEX futures & options quotes | TAIFEX MIS | real time (day and night sessions) |
+| TAIEX / mini futures charts (front month) | Yahoo Taiwan | real time, night session included, auto roll; ~6 months daily, ~7 years weekly, ~12 years monthly |
 | US quotes, charts, extended hours | Yahoo Finance | < 1 s during market hours |
 | US options | Yahoo Finance | may be delayed |
 | Other markets (JP, KR, HK, EU…) | Yahoo Finance | mostly 15–20 min delay |

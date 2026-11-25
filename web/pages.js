@@ -22,14 +22,13 @@ const MARKET_SECTIONS = {
 };
 PAGES.market = {
   async load() { this.render(); await this.refresh(); },
-  codes() { return MARKET_SECTIONS[state.mkt].flatMap(([, l]) => l.map(([c]) => c)).filter((c) => !c.startsWith('FUT.')); },
+  codes() { return MARKET_SECTIONS[state.mkt].flatMap(([, l]) => l.map(([c]) => c)); },
   async refresh() {
     const codes = this.codes();
     try {
       const [q, sp] = await Promise.all([api('/api/quote?codes=' + codes.map(encodeURIComponent).join(',')), api('/api/spark?codes=' + codes.filter((c) => c !== 'o00').map(encodeURIComponent).join(','))]);
       Object.assign(state.quotes, q); Object.assign(state.sparks, sp);
       if (state.mkt === 'tw') await refreshFutures();
-      const mx = state.futures?.find((r) => /^MXF[A-L]\d-F$/.test(r.id)); if (mx) state.quotes['FUT.MXF'] = { code: 'FUT.MXF', name: mx.name, price: mx.last, prev: mx.ref };
       $('#marketUpd').textContent = '更新於 ' + new Date().toTimeString().slice(0, 8);
     } catch (e) { console.warn(e); }
     if (state.view === 'market') this.render();
@@ -38,7 +37,7 @@ PAGES.market = {
   render() {
     $('#marketBody').innerHTML = MARKET_SECTIONS[state.mkt].map(([title, list]) => `<div class="sec-title"><b>${title}</b></div><div class="cards">${list.map(([c, n]) => {
       const q = state.quotes[c], { d, pct } = chgOf(q), k = cls(d), fx = c.includes('=X') || c.startsWith('FX.'), dp = fx ? 4 : c.startsWith('FUT.') ? 0 : pxDp(q?.price);
-      return `<div class="card ${c.startsWith('FUT.') || c === 'o00' ? '' : 'click'}" data-code="${esc(c)}"><div class="k"><span>${esc(n)}</span><span>${esc(showCode(c).replace('FUT.', ''))}</span></div>
+      return `<div class="card ${c === 'o00' ? '' : 'click'}" data-code="${esc(c)}"><div class="k"><span>${esc(n)}</span><span>${esc(showCode(c).replace('FUT.', ''))}</span></div>
         <div class="v num ${k}">${fmtP(q?.price, dp)}</div><div class="s num ${k}">${q ? `${sign(d)}${fmtP(d, dp)}　${sign(pct)}${pct.toFixed(2)}%` : '--'}</div><canvas></canvas></div>`;
     }).join('')}</div>`).join('') + '<div class="hint" style="padding:16px">期貨、商品、加密貨幣與其他國家股市為 Yahoo Finance 資料，多數延遲 15–20 分鐘。點卡片可看走勢，加入自選後台股、美股清單都能放。</div>';
     $$('#marketBody .card').forEach((el) => { const cv = el.querySelector('canvas'); if (state.sparks[el.dataset.code]) drawSpark(cv, state.sparks[el.dataset.code], 80, 32, el.dataset.code); });
@@ -224,7 +223,7 @@ function infoSections(d) {
 }
 PAGES.news = {
   async load(force) {
-    const code = state.code, idx = code === 't00' || code.includes('^') || code.startsWith('Y.') || code.startsWith('FX.');
+    const code = state.code, idx = code === 't00' || isFut(code) || code.includes('^') || code.startsWith('Y.') || code.startsWith('FX.');
     $('#infoTitle').textContent = idx ? '資訊' : `${nameOf(code)}　${showCode(code)}`;
     $('#infoSub').textContent = idx ? '請先在自選清單選一檔個股' : '公司資料、營收、EPS、股利、公告與新聞';
     const seq = ++infoState.seq;

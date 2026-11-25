@@ -112,7 +112,8 @@ const regionOf = (c) => REGION_ZH[c.split('.').pop()] || '國際';
 const isTW = (c) => !c.includes('.') && c !== 't00' && c !== 'o00';
 const isEtf = (c) => /^00/.test(c) || ['US.QQQ', 'US.SPY', 'US.VOO', 'US.SOXX', 'US.SMH', 'US.DIA', 'US.IWM', 'US.TQQQ', 'US.SOXL'].includes(c);
 const isOpt = (c) => c.startsWith('OPT.');
-const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : isGL(c) ? c.slice(2).replace(/\.[A-Z]{1,3}$/, '') : c.startsWith('Y.') ? c.slice(2).replace(/=F$|-USD$/, '') : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
+const isFut = (c) => c.startsWith('FUT.'); // 台指期近月 FUT.TXF、小台指近月 FUT.MXF
+const showCode = (c) => (c.startsWith('US.') ? c.slice(3) : isFut(c) ? c.slice(4) : isGL(c) ? c.slice(2).replace(/\.[A-Z]{1,3}$/, '') : c.startsWith('Y.') ? c.slice(2).replace(/=F$|-USD$/, '') : isOpt(c) ? (c.startsWith('OPT.TW:') ? '台指選' : '美股選擇權') : c);
 const multOf = (c) => (c.startsWith('OPT.TW:') ? 50 : c.startsWith('OPT.US:') ? 100 : 1);
 const mktOf = (c) => (isUS(c) ? 'us' : state.listMap[c]?.mkt || state.quotes[c]?.mkt);
 // 常見美股、期貨、加密貨幣的中文名稱（台灣慣用譯名）放在 names-zh.json，前後端共用；中文介面優先顯示
@@ -126,7 +127,7 @@ const nameOf = (c) => {
   return state.listMap[c]?.name || q?.name || state.names[c] || c;
 };
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-const ccyOf = (c) => (isTW(c) || c.startsWith('OPT.TW:') ? 'TWD' : 'USD');
+const ccyOf = (c) => (isTW(c) || isFut(c) || c.startsWith('OPT.TW:') ? 'TWD' : 'USD');
 function toast(msg, ms = 2600) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), ms); }
 function twNow() { return new Date(Date.now() + (new Date().getTimezoneOffset() * 60 + 8 * 3600) * 1000); }
 function twOpen() { const n = twNow(), d = n.getDay(), m = n.getHours() * 60 + n.getMinutes(); return d >= 1 && d <= 5 && m >= 9 * 60 && m <= 13 * 60 + 30; }
@@ -304,14 +305,15 @@ function renderMain() {
     if (state.period === 'tick') {
       const end = state.sessionEnd && state.sessionEnd > bars[0].t && state.sessionEnd - bars[0].t < 86400 ? state.sessionEnd
         : Math.floor((bars[0].t + state.off) / 86400) * 86400 - state.off + 13.5 * 3600;
-      for (let t = bars[bars.length - 1].t + 60; t <= end; t += 60) data.push({ time: toTime(t) });
+      const inSess = (t) => !state.futSess || state.futSess.some(([a, b]) => t >= a && t < b);
+      for (let t = bars[bars.length - 1].t + 60; t <= end; t += 60) if (inSess(t)) data.push({ time: toTime(t) });
     }
     state.fillTimes = state.period === 'tick' ? data.map((x) => x.time) : null;
     primary.setData(data);
     if (base) priceLine(primary, { price: base, color: '#7d8494', lineStyle: 2, lineWidth: 1, axisLabelVisible: true, title: '昨收' });
     let pv = 0, vv = 0;
     const avg = bars.map((b, i) => {
-      if (i > 0 && Math.floor((b.t + state.off) / 86400) !== Math.floor((bars[i - 1].t + state.off) / 86400)) { pv = 0; vv = 0; }
+      if (i > 0 && !state.futSess && Math.floor((b.t + state.off) / 86400) !== Math.floor((bars[i - 1].t + state.off) / 86400)) { pv = 0; vv = 0; }
       pv += ((b.h + b.l + b.c) / 3) * b.v; vv += b.v; return vv ? pv / vv : b.c;
     });
     const l = { name: '均價', color: '#f5a524', vals: avg };
@@ -366,9 +368,10 @@ function updateLegend(i) {
   const P = PERIODS[state.period];
   const ref = i > 0 ? state.bars[i - 1].c : (state.prev ?? b.o), base = P.line ? (state.prev ?? state.bars[0].c) : ref;
   const d = b.c - base, pct = base ? (d / base) * 100 : 0;
-  let h = P.line ? `<span><span class="lbl">價</span> <span class="num ${cls(d)}">${fmtP(b.c)}</span></span>`
-    : [['開', 'o'], ['高', 'h'], ['低', 'l'], ['收', 'c']].map(([n, k]) => `<span><span class="lbl">${n}</span> <span class="num ${cls(b[k] - ref)}">${fmtP(b[k])}</span></span>`).join('');
-  h += `<span class="num ${cls(d)}">${sign(d)}${fmtP(d)} (${sign(pct)}${pct.toFixed(2)}%)</span>`;
+  const dp = isFut(state.code) ? 0 : 2; // 期貨是整數報價
+  let h = P.line ? `<span><span class="lbl">價</span> <span class="num ${cls(d)}">${fmtP(b.c, dp)}</span></span>`
+    : [['開', 'o'], ['高', 'h'], ['低', 'l'], ['收', 'c']].map(([n, k]) => `<span><span class="lbl">${n}</span> <span class="num ${cls(b[k] - ref)}">${fmtP(b[k], dp)}</span></span>`).join('');
+  h += `<span class="num ${cls(d)}">${sign(d)}${fmtP(d, dp)} (${sign(pct)}${pct.toFixed(2)}%)</span>`;
   overlayInfo.forEach((o) => { if (o.vals[i] != null) h += `<span style="color:${o.color}" class="num">${o.name}: ${fmtP(o.vals[i])}</span>`; });
   $('#legendMain').innerHTML = h;
 }
@@ -461,7 +464,8 @@ async function loadKline(keepRange = false) {
     state.off = d.gmtoffset ?? 8 * 3600; state.dOff = isUS(code) ? 8 * 3600 : state.off; state.sessionEnd = d.ext && d.postEnd ? d.postEnd : d.sessionEnd;
     state.regular = d.ext ? d.regular || [] : []; state.postEnd = d.postEnd;
     let bars = d.bars;
-    if (state.period === 'tick' && bars.length) { const lastDay = Math.floor((bars[bars.length - 1].t + state.off) / 86400); bars = bars.filter((b) => Math.floor((b.t + state.off) / 86400) === lastDay); }
+    state.futSess = isFut(code) && d.sessions?.length ? d.sessions : null;
+    if (state.period === 'tick' && bars.length && !isFut(code)) { const lastDay = Math.floor((bars[bars.length - 1].t + state.off) / 86400); bars = bars.filter((b) => Math.floor((b.t + state.off) / 86400) === lastDay); }
     state.tickWin = null; state.sessShown = null;
     if (sessOn() && bars.length) {
       const m = sessResolved(), H = 3600, now = Date.now() / 1000;
@@ -534,10 +538,11 @@ function liveUpdate() {
   const last = state.bars[state.bars.length - 1], volMul = isTW(state.code) ? 1000 : 1;
   const dv = state.lastVol != null && q.volume != null ? Math.max(0, (q.volume - state.lastVol) * volMul) : 0;
   state.lastVol = q.volume;
-  if (!(q.price > 0) || q.ts < last.t) return;
+  const qt = !step && q.tday ? Math.max(q.ts, q.tday) : q.ts; // 期貨夜盤算下一個交易日
+  if (!(q.price > 0) || qt < last.t) return;
   const day = (t) => Math.floor((t + state.off) / 86400);
   if (step && q.ts >= last.t + step) state.bars.push({ t: last.t + Math.floor((q.ts - last.t) / step) * step, o: q.price, h: q.price, l: q.price, c: q.price, v: dv });
-  else if (!step && P.interval === '1d' && day(q.ts) > day(last.t)) state.bars.push({ t: q.ts, o: q.open ?? q.price, h: q.high ?? q.price, l: q.low ?? q.price, c: q.price, v: dv }); // 日K：新的一天開新的一根
+  else if (!step && P.interval === '1d' && day(qt) > day(last.t)) state.bars.push({ t: qt, o: q.open ?? q.price, h: q.high ?? q.price, l: q.low ?? q.price, c: q.price, v: dv }); // 日K：新的一天開新的一根
   else { last.c = q.price; last.h = Math.max(last.h, q.price); last.l = Math.min(last.l, q.price); last.v += dv; }
   softRender(); updateLegend(state.bars.length - 1);
 }
@@ -748,7 +753,7 @@ function stockMenu(code, x, y, inWatch) {
   const inList = state.watch.includes(code);
   const items = [
     { label: '設定提醒', icon: '⏰', act: () => editAlert(code) },
-    { label: '交易（模擬）', icon: '⇄', disabled: code === 't00', act: () => { selectCode(code); switchSideTab('trade'); } },
+    { label: '交易（模擬）', icon: '⇄', disabled: code === 't00' || isFut(code), act: () => { selectCode(code); switchSideTab('trade'); } },
     { label: '編輯備註', icon: '▤', act: () => promptBox('編輯備註', '備註（顯示在清單）', state.notes[code], (v) => { v ? (state.notes[code] = v) : delete state.notes[code]; save('notes'); renderWatch(); renderSide(); }) },
     { label: '個股筆記', icon: '✎', act: () => editMemo(code) },
     'sep',
@@ -884,7 +889,7 @@ function renderSide() {
   if ((state.sideTab === 'inst' && !tw) || (state.sideTab === 'book' && state.mkt !== 'tw')) switchSideTab(state.mkt === 'tw' ? 'book' : 'trade');
   if (state.sideTab === 'book') renderBook();
   if (state.sideTab === 'trade') { if (!state.ticket.price && q?.price) renderTicket(); else renderTicketInfo(); }
-  $('#topQuote').innerHTML = q ? `<b>${isIdx ? '' : esc(showCode(c)) + ' '}${esc(nameOf(c))}</b><span class="num ${k}">${fmtP(q.price)}</span><span class="num ${k}">${sign(d)}${fmtP(d)}</span><span class="num ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : `<b>${esc(nameOf(c))}</b>`;
+  $('#topQuote').innerHTML = q ? `<b>${isIdx ? '' : esc(showCode(c)) + ' '}${esc(nameOf(c))}</b><span class="num ${k}">${fmtP(q.price, isFut(c) ? 0 : 2)}</span><span class="num ${k}">${sign(d)}${fmtP(d, isFut(c) ? 0 : 2)}</span><span class="num ${k}">${sign(pct)}${pct.toFixed(2)}%</span>` : `<b>${esc(nameOf(c))}</b>`;
 }
 $('#sideNote').addEventListener('click', () => editMemo(state.code));
 $('#alertBtn').addEventListener('click', () => editAlert(state.code));
@@ -893,6 +898,7 @@ $('#favBtn').addEventListener('click', () => (state.watch.includes(state.code) ?
 function renderBook() {
   const el = $('#tabBook'), q = state.quotes[state.code];
   if (state.code === 't00') { el.innerHTML = '<div class="empty">指數沒有五檔報價</div>'; return; }
+  if (isFut(state.code)) { const q = state.quotes[state.code]; el.innerHTML = `<div class="empty">${esc(q?.contract || '')}　買 ${fmtP(q?.bid, 0)}／賣 ${fmtP(q?.ask, 0)}<br><span class="small">完整期貨報價請到「期權」頁</span></div>`; return; }
   if (!isTW(state.code)) { el.innerHTML = '<div class="empty">免費資料源沒有美股五檔<br>（需付費 Level 2 行情）</div>'; return; }
   if (!q || (!q.asks?.length && !q.bids?.length)) { el.innerHTML = `<div class="empty">目前沒有五檔資料<br>${q?.source === 'yahoo' ? '（證交所 MIS 暫時連不上，改用 Yahoo 延遲報價，沒有五檔）' : '（盤後或尚未開盤）'}</div>`; return; }
   const mx = Math.max(1, ...[...q.asks, ...q.bids].map((x) => x.v || 0));
@@ -961,7 +967,7 @@ function feesOf(code, side, amount, qty = 1) {
   if (!isTW(code)) return { fee: 0, tax: 0 }; return { fee: Math.max(20, Math.round(amount * 0.001425)), tax: side === 'sell' ? Math.round(amount * (code.startsWith('0') ? 0.001 : 0.003)) : 0 }; }
 function renderTicket() {
   const el = $('#tabTrade'), c = state.code, t = state.ticket;
-  if (c === 't00' || c.startsWith('FX.') || c.startsWith('Y.') || isGL(c)) { el.innerHTML = `<div class="empty">${isGL(c) ? '其他股市暫不支援模擬交易' : '這個商品不能模擬交易'}，請選擇台股或美股個股</div>`; return; }
+  if (c === 't00' || isFut(c) || c.startsWith('FX.') || c.startsWith('Y.') || isGL(c)) { el.innerHTML = `<div class="empty">${isGL(c) ? '其他股市暫不支援模擬交易' : '這個商品不能模擬交易'}，請選擇台股或美股個股</div>`; return; }
   const q = state.quotes[c];
   if (!t.price || t.code !== c) { t.price = q?.price ?? ''; t.code = c; t.unit = isTW(c) ? 1000 : 1; t.qty = 1; }
   if (!isTW(c)) t.unit = 1;
@@ -1116,7 +1122,7 @@ function renderFoot() {
 }
 $('#foot').addEventListener('click', (e) => {
   const el = e.target.closest('.foot-idx'); if (!el) return; const c = el.dataset.code;
-  if (c === 'FUT.TXF') { setView('options'); return; } if (c.startsWith('FX.') || c === 'o00') return;
+  if (c.startsWith('FX.') || c === 'o00') return;
   selectCode(c); setView('chart');
 });
 setInterval(() => {
@@ -1134,6 +1140,10 @@ function searchTW(qs) {
   a.sort((x, y) => x.code.length - y.code.length || x.code.localeCompare(y.code));
   return [...a, ...b].slice(0, 15);
 }
+// 指數與期貨：打「台指」「大盤」「TX」也找得到
+const IDX_SEARCH = [{ code: 't00', name: '加權指數', k: '加權指數 台指 大盤 taiex twii t00', mkt: 'idx' }, { code: 'o00', name: '櫃買指數', k: '櫃買指數 otc o00', mkt: 'idx' },
+  { code: 'FUT.TXF', name: '台指期近月', k: '台指期近月 台指期 大台 txf tx wtx', mkt: 'fut' }, { code: 'FUT.MXF', name: '小台指近月', k: '小台指近月 小台指 小台 mxf mtx', mkt: 'fut' }];
+function searchIdx(qs) { qs = qs.trim().toLowerCase(); return qs ? IDX_SEARCH.filter((s) => s.k.includes(qs)) : []; }
 // 本機中文名稱表（美股＋其他股市），打中文立刻有結果，不用等 Yahoo
 function searchZh(qs) {
   qs = qs.trim().toLowerCase(); if (!qs) return [];
@@ -1146,7 +1156,7 @@ function searchZh(qs) {
   return out.sort((x, y) => x.r - y.r || x.name.length - y.name.length).slice(0, 12);
 }
 function mergeResults(...lists) { const seen = new Set(), out = []; lists.flat().forEach((s) => { if (s && !seen.has(s.code)) { seen.add(s.code); out.push(s); } }); return out.slice(0, 24); }
-const mktLabel = (s) => (s.mkt === 'us' ? s.ex || '美股' : s.mkt === 'gl' ? s.ex || '國際' : s.mkt === 'otc' ? '上櫃' : '上市');
+const mktLabel = (s) => (s.mkt === 'idx' ? '指數' : s.mkt === 'fut' ? '期貨' : s.mkt === 'us' ? s.ex || '美股' : s.mkt === 'gl' ? s.ex || '國際' : s.mkt === 'otc' ? '上櫃' : '上市');
 function renderDrop() {
   const dr = $('#searchDrop'), v = $('#searchInput').value.trim();
   if (!v) { dr.classList.remove('open'); return; }
@@ -1157,7 +1167,7 @@ function renderDrop() {
 // 一個搜尋框查全部市場：台股清單、中文名稱表先出，再補上 Yahoo（美股與日韓港歐等）的結果
 $('#searchInput').addEventListener('input', (e) => {
   const v = e.target.value.trim(), seq = ++searchSeq; clearTimeout(usTimer);
-  const tw = searchTW(v), zh = searchZh(v), local = state.mkt === 'tw' ? mergeResults(tw, zh) : mergeResults(zh, tw);
+  const tw = mergeResults(searchIdx(v), searchTW(v)), zh = searchZh(v), local = state.mkt === 'tw' ? mergeResults(tw, zh) : mergeResults(zh, tw);
   results = local; hl = 0;
   const remote = v && /[a-z0-9]/i.test(v);
   searchMsg = remote ? '搜尋其他市場中…' : ''; renderDrop();
@@ -1245,7 +1255,6 @@ let quoteBusy = false, quotePending = false;
 async function refreshFutures() {
   try {
     const list = await api('/api/futures'); const near = list.find((r) => /^TXF[A-L]\d-F$/.test(r.id));
-    if (near) state.quotes['FUT.TXF'] = { code: 'FUT.TXF', name: near.name, price: near.last, prev: near.ref, high: near.high, low: near.low };
     state.futures = list;
   } catch {}
 }
@@ -1254,7 +1263,7 @@ async function refreshQuotes() {
   quoteBusy = true;
   const pos = state.paper ? Object.keys(state.paper.positions) : [], pend = state.paper ? state.paper.orders.filter((o) => o.status === 'pending').map((o) => o.code) : [];
   const mine = (c) => ccyOf(c) === (state.mkt === 'tw' ? 'TWD' : 'USD');
-  const codes = [...new Set([...state.watch, state.code, ...pos.filter(mine), ...pend.filter(mine), ...Object.keys(state.alerts).filter(mine), ...FOOT_BY[state.mkt].filter((c) => c !== 'FUT.TXF')])];
+  const codes = [...new Set([...state.watch, state.code, ...pos.filter(mine), ...pend.filter(mine), ...Object.keys(state.alerts).filter(mine), ...FOOT_BY[state.mkt]])];
   try {
     const [q] = await Promise.all([api('/api/quote?codes=' + codes.map(encodeURIComponent).join(',')), state.mkt === 'tw' ? refreshFutures() : null]);
     Object.assign(state.quotes, q);

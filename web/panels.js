@@ -6,7 +6,7 @@
   const infoCache = {}; // code -> /api/info
   let infoTab = 'news', chipsBars = { code: null, bars: [], shares: null }, chipsIdx = null;
 
-  function isIdx(c) { return c === 't00' || c.includes('^') || c.startsWith('Y.') || c.startsWith('FX.') || c.startsWith('OPT.'); }
+  function isIdx(c) { return c === 't00' || isFut(c) || c.includes('^') || c.startsWith('Y.') || c.startsWith('FX.') || c.startsWith('OPT.'); }
 
   function show(name) {
     cur = name; store.set('tw.sidePanel', name);
@@ -113,7 +113,7 @@
   /* ---------- 期權（精簡 T 字報價，點價格可模擬下單） ---------- */
   const opt = { und: null, exp: {}, data: null, t: 0 };
   function optUnderlying(code) {
-    if (isTW(code) || code === 't00') return 'TXO';
+    if (isTW(code) || code === 't00' || isFut(code)) return 'TXO';
     if (isUS(code) && !code.includes('^')) return 'US.' + showCode(code);
     return null;
   }
