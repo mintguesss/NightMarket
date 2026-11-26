@@ -3014,17 +3014,39 @@ class ShareHandler(Handler):
         self.end_headers()
         self.wfile.write(body)
 
+    def end_headers(self):
+        if getattr(self, "_set_cookie", None):  # 帶密鑰進來：存成 cookie（一年）
+            self.send_header("Set-Cookie", f"{self.COOKIE}={self._set_cookie}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax")
+        super().end_headers()
+
+    def _send_text(self, body, ctype):
+        body = body.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
+        # 不要轉址：裝了 service worker 之後，瀏覽器會拒絕 service worker 交回「轉址過」的頁面，
+        # 朋友第二次點同一條連結就會變成「無法連上這個網站」
         self._set_cookie = None
         if not self._authorized():
             return self._deny()
-        if self._set_cookie:  # 帶密鑰進來：存 cookie，轉回乾淨的網址
-            self.send_response(302)
-            self.send_header("Set-Cookie", f"{self.COOKIE}={self._set_cookie}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax")
-            self.send_header("Location", "/")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
+        u = urllib.parse.urlparse(self.path)
+        tok = share_token()
+        if u.path in ("/", "/index.html"):
+            # 網址列一律帶著密鑰，加書籤、加入主畫面、換瀏覽器開都不會掉；manifest 也帶密鑰，主畫面圖示的起始網址才會有
+            html = open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()
+            html = html.replace('href="manifest.webmanifest"', f'href="manifest.webmanifest?k={tok}"', 1)
+            fix = ("<script>(function(){var p=new URLSearchParams(location.search);if(p.get('k')!==%s){p.set('k',%s);"
+                   "history.replaceState(null,'',location.pathname+'?'+p+location.hash);}})();</script>") % (json.dumps(tok), json.dumps(tok))
+            html = html.replace("</head>", fix + "</head>", 1)
+            return self._send_text(html, "text/html; charset=utf-8")
+        if u.path == "/manifest.webmanifest" and hmac.compare_digest(urllib.parse.parse_qs(u.query).get("k", [""])[0], tok):
+            m = json.load(open(os.path.join(ROOT, "web", "manifest.webmanifest"), encoding="utf-8"))
+            m["start_url"] = "./?k=" + tok
+            return self._send_text(json.dumps(m, ensure_ascii=False), "application/manifest+json")
         return super().do_GET()
 
     def do_POST(self):
